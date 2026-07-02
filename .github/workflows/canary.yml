@@ -1,0 +1,97 @@
+name: Canary (claude-code drift sentinel)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THIS EXISTS
+#
+# airgap reads and rewrites on-disk claude-code session files (~/.claude). Those
+# formats are undocumented and can shift on any claude release. Competitors ship
+# against a single frozen snapshot of the format; airgap instead watches the
+# *latest* claude-code every day and re-runs its own pack/open pipeline against a
+# synthetic session.
+#
+# WHAT A RED "canary" JOB MEANS
+#   The newest @anthropic-ai/claude-code has (or coincides with) a change that
+#   breaks airgap's own pipeline OR signals possible session-format drift.
+#   ACTION: a human must manually re-check `airgap open` load compatibility
+#   against the new claude version — inspect ~/.claude/projects/<munged>/*.jsonl
+#   for structural changes (new record types, moved fields, changed munge rule,
+#   sidecar layout) and update src/slice.ts / src/commands/open.ts as needed.
+#
+# NOTE: this workflow deliberately does NOT run `claude --resume` (that needs a
+# paid, logged-in account). It installs claude-code only to (a) capture the
+# current version number as a drift signal and (b) fail loudly when a new
+# version lands, prompting the manual compatibility check. All correctness
+# assertions run against airgap's own pack/open pipeline.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    # Daily at 06:17 UTC. Odd minute to avoid the top-of-hour scheduling stampede.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: airgap pipeline vs latest claude-code
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build airgap
+        run: npm run build
+
+      - name: Install latest claude-code
+        run: npm i -g @anthropic-ai/claude-code@latest
+
+      - name: Record claude-code version
+        id: claude
+        run: |
+          set -euo pipefail
+          VERSION="$(claude --version 2>/dev/null | head -n1 || echo 'unknown')"
+          echo "Installed claude-code: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Canary run"
+            echo ""
+            echo "- claude-code under test: \`$VERSION\`"
+            echo "- npm dist-tag \`@latest\` of \`@anthropic-ai/claude-code\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The e2e drives airgap's OWN pack/open pipeline against a synthetic
+      # claude session. A failure here = likely session-format drift → do the
+      # manual `airgap open` compatibility check described in the header above.
+      - name: Run canary e2e (airgap pipeline smoke)
+        run: bash scripts/canary-e2e.sh
+        env:
+          AIRGAP_ENTRY: ${{ github.workspace }}/dist/index.js
+
+      - name: Canary summary
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ airgap pipeline is compatible with claude-code ${{ steps.claude.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "🔴 **Canary RED** — airgap pipeline failed against claude-code \`${{ steps.claude.outputs.version }}\`."
+              echo ""
+              echo "A new claude-code release may have changed the on-disk session format."
+              echo "Manually re-check \`airgap open\` load compatibility before shipping."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

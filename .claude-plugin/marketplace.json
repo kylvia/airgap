@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-marketplace.json",
+  "name": "airgap-marketplace",
+  "owner": {
+    "name": "airgap"
+  },
+  "description": "airgap — scan, redact, and carry your local AI coding sessions. No cloud, no accounts.",
+  "plugins": [
+    {
+      "name": "airgap",
+      "source": "./plugin",
+      "description": "Slash commands for airgap (scan / pack / share / rescue) plus a PreCompact hook that snapshots the session before compaction.",
+      "version": "0.1.0",
+      "author": {
+        "name": "airgap"
+      },
+      "keywords": ["claude-code", "secrets", "redaction", "handoff", "backup"]
+    }
+  ]
+}

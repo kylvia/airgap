@@ -141,15 +141,15 @@ function scanTurns(turns: Turn[], scan: (s: string) => RuleMatch[]): RuleMatch[]
 export function registerShow(program: Command): void {
   program
     .command("show")
-    .description("把会话的若干轮渲染成 markdown / 单文件 HTML / 长图 PNG（默认 HTML）")
-    .option("--last <n>", "只取最后 N 轮")
-    .option("--pick", "交互式勾选要导出的轮次")
-    .option("--session <prefix>", "按 session id 前缀指定会话")
-    .option("--md", "输出 markdown")
-    .option("--html", "输出单文件 HTML（默认）")
-    .option("--png", "输出长图 PNG（需要本机 Chrome）")
-    .option("--out <file>", "输出文件路径")
-    .option("--yes", "跳过密钥命中确认")
+    .description("Render selected turns of a session to markdown / single-file HTML / long-image PNG (HTML by default)")
+    .option("--last <n>", "keep only the last N turns")
+    .option("--pick", "interactively select which turns to export")
+    .option("--session <prefix>", "select a session by session id prefix")
+    .option("--md", "output markdown")
+    .option("--html", "output a single-file HTML (default)")
+    .option("--png", "output a long-image PNG (requires a local Chrome)")
+    .option("--out <file>", "output file path")
+    .option("--yes", "skip the secret-hit confirmation")
     .action(async (opts: ShowOpts) => {
       // 1. 选会话：--session 前缀优先，否则 cwd 对应项目里最近的，再否则全局最近的
       const sessions = await discoverSessions({});

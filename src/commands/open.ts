@@ -305,11 +305,11 @@ export async function runOpen(file: string, opts: OpenCliOptions, deps: OpenDeps
 export function registerOpen(program: Command): void {
   program
     .command("open")
-    .description("校验并安装一个 .ccpack 到本机 claude，生成可 resume 的新会话")
-    .argument("<file>", ".ccpack 文件路径")
-    .option("--project <dir>", "目标项目目录（默认询问，非交互时取当前目录）")
-    .option("--print-only", "只解包到临时目录并打印文件路径，不安装")
-    .option("--accept-risk", "独立重扫发现明文密钥时仍强制安装（默认拒绝）")
+    .description("Verify and install a .ccpack into local claude as a new resumable session")
+    .argument("<file>", "path to the .ccpack file")
+    .option("--project <dir>", "target project directory (prompts by default, uses cwd when non-interactive)")
+    .option("--print-only", "only extract to a temp directory and print file paths, do not install")
+    .option("--accept-risk", "install anyway when the independent re-scan finds plaintext secrets (refused by default)")
     .action(async (file: string, opts: OpenCliOptions) => {
       try {
         await runOpen(file, opts);

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "airgap",
+  "displayName": "airgap",
+  "version": "0.1.0",
+  "description": "Scan, redact, and carry your local AI coding sessions — no cloud, no accounts. Adds /airgap-scan, /airgap-pack, /airgap-share plus a PreCompact rescue hook that snapshots the session before compaction.",
+  "author": {
+    "name": "airgap"
+  },
+  "homepage": "https://github.com/airgap-cli/airgap",
+  "repository": "https://github.com/airgap-cli/airgap",
+  "license": "MIT",
+  "keywords": ["claude-code", "codex", "session", "secrets", "redaction", "handoff", "backup"],
+  "commands": "./commands/",
+  "hooks": "./hooks/hooks.json"
+}

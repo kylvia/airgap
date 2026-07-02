@@ -35,7 +35,7 @@ export function probeToolVersion(cmd: string, timeoutMs = 3000): Promise<string 
 export function registerDoctor(program: Command): void {
   program
     .command("doctor")
-    .description("环境体检：本机 claude/codex 版本与格式支持矩阵")
+    .description("Environment check: local claude/codex versions and the format support matrix")
     .action(async () => {
       const [claudeV, codexV] = await Promise.all([probeToolVersion("claude"), probeToolVersion("codex")]);
       const row = (label: string, value: string | null): string =>
