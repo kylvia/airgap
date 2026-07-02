@@ -1,5 +1,7 @@
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { streamLines, tryParse } from "./util/jsonl.js";
+import { isCodexScaffold } from "./util/codex.js";
 import type {
   JsonlRecord,
   SessionInfo,
@@ -94,7 +96,7 @@ export async function sliceSession(info: SessionInfo, opts: SliceOptions = {}): 
   return sliceClaude(info, records, opts);
 }
 
-function sliceClaude(info: SessionInfo, records: JsonlRecord[], opts: SliceOptions): SlicedSession {
+async function sliceClaude(info: SessionInfo, records: JsonlRecord[], opts: SliceOptions): Promise<SlicedSession> {
   // index by uuid
   const byUuid = new Map<string, JsonlRecord>();
   for (const r of records) {
@@ -239,13 +241,44 @@ function sliceClaude(info: SessionInfo, records: JsonlRecord[], opts: SliceOptio
 
   const keptList = records.filter((r) => kept.has(r));
 
-  // rewrite parentUuid -> null when the parent fell outside the slice (chain head + expansion orphans)
+  // rewrite parentUuid when the parent fell outside the slice (chain head + expansion orphans).
+  //
+  // F12: naively re-rooting every orphan to null strands a retained compact summary as an
+  // isolated second root — the resume active chain (walked leaf->root via parentUuid) then
+  // never reaches it and the pre-compaction context is silently lost. Instead we chain the
+  // kept compact summaries together (earliest is the null root, each later one re-parents to
+  // the previous) and re-parent every other orphan head to the nearest preceding kept compact
+  // summary, so the active chain flows leaf -> ... -> compact summary -> null.
+  let compactSummaryRerooted = false;
+  let lastCompactUuid: string | null = null; // nearest preceding kept compact summary, in file order
   for (const r of keptList) {
     const j = r.json;
     if (!j) continue;
+    const isCompact = j.isCompactSummary === true && j.type === "user";
     const p = asString(j.parentUuid);
-    if (p && !keptUuids.has(p)) {
-      j.parentUuid = null;
+    // parent pointer that does not resolve inside the slice (missing, or points outside)
+    const parentOutside = p !== null && !keptUuids.has(p);
+
+    if (isCompact) {
+      // chain compact summaries: first stays/root=null, later ones link to the previous
+      if (lastCompactUuid !== null) {
+        if (j.parentUuid !== lastCompactUuid) {
+          j.parentUuid = lastCompactUuid;
+          reserialize(r);
+        }
+      } else if (parentOutside) {
+        j.parentUuid = null;
+        reserialize(r);
+      }
+      const u = asString(j.uuid);
+      if (u) lastCompactUuid = u;
+    } else if (parentOutside) {
+      if (lastCompactUuid !== null) {
+        j.parentUuid = lastCompactUuid;
+        compactSummaryRerooted = true;
+      } else {
+        j.parentUuid = null;
+      }
       reserialize(r);
     }
   }
@@ -280,7 +313,7 @@ function sliceClaude(info: SessionInfo, records: JsonlRecord[], opts: SliceOptio
     droppedTypes[t] = (droppedTypes[t] ?? 0) + 1;
   }
 
-  const sidecars = filterSidecars(info.sidecars, keptList);
+  const sidecars = await filterSidecars(info.sidecars, keptList);
 
   const report: SliceReport = {
     totalRecords: records.length,
@@ -290,55 +323,157 @@ function sliceClaude(info: SessionInfo, records: JsonlRecord[], opts: SliceOptio
     subagentFiles: sidecars.subagents.length,
     toolResultFiles: sidecars.toolResults.length,
     closureComplete,
+    compactSummaryRerooted,
   };
 
   return { info, records: keptList, sidecars, report };
 }
 
-/** Keep only sidecar files actually referenced by the kept records. */
-function filterSidecars(all: SidecarFiles, keptList: JsonlRecord[]): SidecarFiles {
-  const text = keptList.map((r) => r.raw).join("\n");
+/** True when the given subagent sidecar file is referenced by the given matching text. */
+function subagentReferenced(file: string, text: string): boolean {
+  const token = path.basename(file).replace(/\.meta\.json$/, "").replace(/\.jsonl$/, "");
+  if (token.length === 0) return false;
+  if (text.includes(token)) return true;
+  const idPart = token.startsWith("agent-") ? token.slice("agent-".length) : token;
+  return idPart.length >= 8 && text.includes(idPart);
+}
+
+/**
+ * Keep only sidecar files actually referenced by the kept records.
+ *
+ * F14: the main transcript is not the only referrer — a kept subagent jsonl may itself
+ * reference tool-results (or further agent-*.jsonl). Matching only against the main
+ * transcript text drops those and breaks the pack's closure rule (d). So we iterate to a
+ * fixpoint: start from the main-transcript text, pull in every subagent it references, fold
+ * that subagent's file contents into the matching text, and repeat until the selected
+ * subagent set stops growing. tool-results are then filtered against the merged text.
+ */
+async function filterSidecars(all: SidecarFiles, keptList: JsonlRecord[]): Promise<SidecarFiles> {
+  const mainText = keptList.map((r) => r.raw).join("\n");
+  const contentCache = new Map<string, string>();
+  const readContent = async (file: string): Promise<string> => {
+    let c = contentCache.get(file);
+    if (c === undefined) {
+      try {
+        c = await readFile(file, "utf8");
+      } catch {
+        c = "";
+      }
+      contentCache.set(file, c);
+    }
+    return c;
+  };
+
+  // fixpoint over the subagent set: each newly selected subagent's file content may reference
+  // further subagents, so keep re-scanning until nothing new is added.
+  const selected = new Set<string>();
+  let mergedText = mainText;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const f of all.subagents) {
+      if (selected.has(f)) continue;
+      if (subagentReferenced(f, mergedText)) {
+        selected.add(f);
+        changed = true;
+        // only .jsonl files carry referencing content worth folding in (.meta.json is metadata)
+        if (f.endsWith(".jsonl")) mergedText += "\n" + (await readContent(f));
+      }
+    }
+  }
+
+  const subagents = all.subagents.filter((f) => selected.has(f));
   const toolResults = all.toolResults.filter((f) => {
     const token = path.basename(f).replace(/\.txt$/, "");
-    return token.length > 0 && text.includes(token);
-  });
-  const subagents = all.subagents.filter((f) => {
-    const token = path.basename(f).replace(/\.meta\.json$/, "").replace(/\.jsonl$/, "");
-    if (token.length === 0) return false;
-    if (text.includes(token)) return true;
-    const idPart = token.startsWith("agent-") ? token.slice("agent-".length) : token;
-    return idPart.length >= 8 && text.includes(idPart);
+    return token.length > 0 && mergedText.includes(token);
   });
   return { subagents, toolResults };
 }
 
+/** Concatenated text of a codex response_item message payload's content blocks. */
+function codexUserPayloadText(j: J): string {
+  const p = j.payload;
+  if (!p || typeof p !== "object") return "";
+  const content = (p as J).content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const item of content) {
+    if (!item || typeof item !== "object") continue;
+    const t = (item as J).type;
+    const text = (item as J).text;
+    if ((t === "input_text" || t === "text") && typeof text === "string") parts.push(text);
+  }
+  return parts.join("\n");
+}
+
 /** Codex rollouts are a linear stream: session_meta first, then response_item/event_msg/turn_context. */
 function sliceCodex(info: SessionInfo, records: JsonlRecord[], opts: SliceOptions): SlicedSession {
-  const isCodexUserMsg = (j: J): boolean => {
+  // A *real* user turn: role=user message whose text is not a codex scaffold injection
+  // (<environment_context>/<user_instructions>/AGENTS.md/…). Scaffold records still travel
+  // with the slice — they just don't count as tail turn boundaries (F13).
+  const isRealUserTurn = (j: J): boolean => {
     if (j.type !== "response_item") return false;
     const p = j.payload;
-    return !!p && typeof p === "object" && (p as J).type === "message" && (p as J).role === "user";
+    if (!p || typeof p !== "object" || (p as J).type !== "message" || (p as J).role !== "user") return false;
+    const text = codexUserPayloadText(j);
+    return text.trim().length > 0 && !isCodexScaffold(text);
   };
 
   let start = 0;
   if (opts.tail !== undefined && opts.tail > 0) {
     const idx: number[] = [];
     records.forEach((r, i) => {
-      if (r.json && isCodexUserMsg(r.json)) idx.push(i);
+      if (r.json && isRealUserTurn(r.json)) idx.push(i);
     });
     if (idx.length > opts.tail) start = idx[idx.length - opts.tail] ?? 0;
   }
 
+  const inWindow = new Set<JsonlRecord>();
+  records.forEach((r, i) => {
+    if (r.json !== null && (r.json.type === "session_meta" || i >= start)) inWindow.add(r);
+  });
+
+  // call_id pairing extension: if a kept function_call/output has its partner outside the
+  // window, pull the partner back in so tool pairs never split across the tail boundary.
+  const callRecs = new Map<string, JsonlRecord>();
+  const outputRecs = new Map<string, JsonlRecord>();
+  for (const r of records) {
+    const j = r.json;
+    if (!j || j.type !== "response_item") continue;
+    const p = j.payload;
+    if (!p || typeof p !== "object") continue;
+    const pj = p as J;
+    const cid = asString(pj.call_id);
+    if (!cid) continue;
+    if (pj.type === "function_call") callRecs.set(cid, r);
+    else if (pj.type === "function_call_output") outputRecs.set(cid, r);
+  }
+  for (const r of [...inWindow]) {
+    const j = r.json;
+    if (!j || j.type !== "response_item") continue;
+    const p = j.payload;
+    if (!p || typeof p !== "object") continue;
+    const pj = p as J;
+    const cid = asString(pj.call_id);
+    if (!cid) continue;
+    if (pj.type === "function_call") {
+      const out = outputRecs.get(cid);
+      if (out) inWindow.add(out);
+    } else if (pj.type === "function_call_output") {
+      const call = callRecs.get(cid);
+      if (call) inWindow.add(call);
+    }
+  }
+
   const keptList: JsonlRecord[] = [];
   const droppedTypes: Record<string, number> = {};
-  records.forEach((r, i) => {
-    const keep = r.json !== null && (r.json.type === "session_meta" || i >= start);
-    if (keep) keptList.push(r);
+  for (const r of records) {
+    if (inWindow.has(r)) keptList.push(r);
     else {
       const t = recordType(r);
       droppedTypes[t] = (droppedTypes[t] ?? 0) + 1;
     }
-  });
+  }
 
   // function_call <-> function_call_output pairing via call_id
   const callIds = new Set<string>();

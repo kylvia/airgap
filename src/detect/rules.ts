@@ -85,11 +85,17 @@ export const RULES: Rule[] = [
     pattern: /[0-9]{8,10}:AA[A-Za-z0-9_-]{33}/g,
   },
   {
+    // F2: capture the WHOLE PEM block (header + base64 body + footer), not just the
+    // header, so the key material is redacted. [\s\S]*? spans real newlines and the
+    // literal `\n` sequences found inside jsonl string values. The second alternative
+    // is a header-only fallback so a truncated block (BEGIN with no matching END)
+    // still warns; alternation order means a complete block is matched whole first.
     id: "private-key",
     name: "Private key material",
     severity: "critical",
     prefilter: "PRIVATE KEY",
-    pattern: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY/g,
+    pattern:
+      /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----|-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/g,
   },
   {
     id: "jwt",
@@ -118,10 +124,13 @@ export const RULES: Rule[] = [
     pattern: /(?:api[_-]?key|secret|token|passwd|password)['"]?\s*[=:]\s*['"]?([A-Za-z0-9_./+=-]{16,})/gi,
   },
   {
+    // F4: match the whole value to end of line, not just up to the first space, so
+    // passphrases / quoted values with embedded spaces are fully captured (and thus
+    // fully redacted), not truncated at the first whitespace.
     id: "env-dump",
     name: "Environment variable dump",
     severity: "high",
-    pattern: /^[A-Z][A-Z0-9_]{2,}=\S+/gm,
+    pattern: /^[A-Z][A-Z0-9_]{2,}=\S.*$/gm,
   },
 ];
 

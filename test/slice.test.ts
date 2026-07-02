@@ -4,8 +4,10 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { sliceSession } from "../src/slice.js";
 import {
+  writeCodexScaffoldSession,
   writeCodexSession,
   writeFixtureSession,
+  writeSubagentRefSession,
   writeUnclosedSession,
 } from "./fixtures/claude-session.js";
 
@@ -64,13 +66,32 @@ describe("sliceSession tail=N", () => {
     expect(sliced.report.toolUsePairs).toBe(1);
     expect(sliced.report.closureComplete).toBe(true);
 
-    // heads whose parent fell outside the slice are re-rooted
+    // F12: the retained compact summary (u6) is the null root; the active-chain head (u8,
+    // whose real parent u7 fell outside the slice) re-parents to u6 instead of becoming a
+    // second isolated root — so the pre-compaction context stays on the resume chain.
     const byUuid = new Map(sliced.records.map((r) => [r.json?.uuid, r]));
     expect(byUuid.get("u6")?.json?.parentUuid).toBeNull();
-    expect(byUuid.get("u8")?.json?.parentUuid).toBeNull();
+    expect(byUuid.get("u8")?.json?.parentUuid).toBe("u6");
     expect(byUuid.get("u8b")?.json?.parentUuid).toBe("u8");
     // re-rooting is reflected in raw too
-    expect(JSON.parse(byUuid.get("u8")?.raw ?? "{}").parentUuid).toBeNull();
+    expect(JSON.parse(byUuid.get("u8")?.raw ?? "{}").parentUuid).toBe("u6");
+    expect(sliced.report.compactSummaryRerooted).toBe(true);
+
+    // active chain: walking leaf -> root via parentUuid must reach the compact summary
+    const leaf = sliced.records.find((r) => r.json?.uuid === "u10");
+    const chain: string[] = [];
+    let cur = leaf;
+    const guard = new Set<string>();
+    while (cur?.json) {
+      const u = cur.json.uuid as string | undefined;
+      if (!u || guard.has(u)) break;
+      guard.add(u);
+      chain.push(u);
+      const p = cur.json.parentUuid;
+      cur = typeof p === "string" ? byUuid.get(p) : undefined;
+    }
+    expect(chain).toEqual(["u10", "u9", "u8b", "u8", "u6"]);
+    expect(chain).toContain("u6"); // compact summary is on the active chain, not orphaned
   });
 
   it("tail=1: only referenced sidecars are carried", async () => {
@@ -137,5 +158,56 @@ describe("sliceSession (codex, linear)", () => {
     const texts = tail1.records.map((r) => r.raw).join("\n");
     expect(texts).toContain("codex q2");
     expect(texts).not.toContain("codex q1");
+  });
+});
+
+describe("F13 · codex scaffold does not count as a tail turn", () => {
+  const codex = writeCodexScaffoldSession(path.join(tmp, "codex-scaffold"));
+
+  it("tail=N counts only real user turns, excluding scaffold response_items", async () => {
+    // 3 real turns ("real turn one/two/three") + 2 scaffold user messages.
+    // tail=2 must land on real turns two & three, NOT on a scaffold boundary.
+    const tail2 = await sliceSession(codex, { tail: 2 });
+    const texts = tail2.records.map((r) => r.raw).join("\n");
+    expect(texts).toContain("real turn two");
+    expect(texts).toContain("real turn three");
+    expect(texts).not.toContain("real turn one");
+    // scaffold before the window is dropped (would have been kept if counted as a turn)
+    expect(texts).not.toContain("environment_context");
+    expect(texts).not.toContain("AGENTS.md");
+  });
+
+  it("tail=3 == all three real turns, so no cut happens (scaffold count-blindness verified)", async () => {
+    // 3 real turns and tail=3: because scaffolds are NOT counted, idx.length===3 (not >3),
+    // so the window never opens and the whole session is kept. If scaffolds were miscounted
+    // as turns the window would have cut into the real turns.
+    const tail3 = await sliceSession(codex, { tail: 3 });
+    const texts = tail3.records.map((r) => r.raw).join("\n");
+    expect(texts).toContain("real turn one");
+    expect(texts).toContain("real turn two");
+    expect(texts).toContain("real turn three");
+    expect(tail3.report.keptRecords).toBe(tail3.report.totalRecords);
+  });
+
+  it("call_id pairing pulls a cross-boundary function_call/output partner back in", async () => {
+    // function_call cc1 sits with turn two; its output sits after turn three's boundary.
+    // tail=1 window opens at "real turn three": the call (before the window) must be pulled
+    // back so the pair is closed.
+    const tail1 = await sliceSession(codex, { tail: 1 });
+    expect(tail1.report.toolUsePairs).toBe(1);
+    expect(tail1.report.closureComplete).toBe(true);
+    const texts = tail1.records.map((r) => r.raw).join("\n");
+    expect(texts).toContain("cc1");
+  });
+});
+
+describe("F14 · filterSidecars keeps tool-results referenced only by a subagent", () => {
+  it("retains toolu_88.txt (named only inside agent-bbb.jsonl) and drops the unreferenced one", async () => {
+    const sess = writeSubagentRefSession(path.join(tmp, "subref"));
+    const sliced = await sliceSession(sess, {});
+    const trNames = sliced.sidecars.toolResults.map((f) => path.basename(f)).sort();
+    expect(trNames).toEqual(["toolu_88.txt"]);
+    expect(sliced.sidecars.subagents.map((f) => path.basename(f))).toEqual(["agent-bbb.jsonl"]);
+    expect(sliced.report.toolResultFiles).toBe(1);
   });
 });

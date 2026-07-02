@@ -1,9 +1,11 @@
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PREFILTER, RULES } from "../src/detect/rules.js";
 import { scanSessionFile, scanString } from "../src/detect/scanner.js";
 import { discoverSessions } from "../src/discovery.js";
-import type { SessionInfo, Severity } from "../src/types.js";
+import { redactRecords } from "../src/redact.js";
+import type { JsonlRecord, SessionInfo, Severity } from "../src/types.js";
 
 const HOME = fileURLToPath(new URL("./fixtures/home", import.meta.url));
 
@@ -98,6 +100,99 @@ describe("scanString rule hits", () => {
     const m = scanString("sk-ant-api03-Zq8Rf2Kd9Lm4Np6Xw1Vt3Yb5")[0]!;
     expect(m.preview).toBe("sk-a…3Yb5");
     expect(m.preview).not.toContain("api03");
+  });
+});
+
+describe("F2: private-key captures the whole PEM block", () => {
+  const BODY = "MIIBVAIBADANBgkqhkiG9w0BAQEFAASCAT4wggE6AgEAAkEA1234567890abcdef";
+  const pem = (nl: string): string =>
+    `-----BEGIN RSA PRIVATE KEY-----${nl}${BODY}${nl}${BODY}${nl}-----END RSA PRIVATE KEY-----`;
+
+  it("matches the entire block (header + body + footer) with real newlines", () => {
+    const block = pem("\n");
+    const matches = scanString(block).filter((m) => m.ruleId === "private-key");
+    expect(matches).toHaveLength(1);
+    expect(matches[0]!.secret).toBe(block); // whole block, not just the header
+    expect(matches[0]!.secret).toContain("-----END RSA PRIVATE KEY-----");
+  });
+
+  it("matches the whole block when newlines are the literal two-char \\n (jsonl form)", () => {
+    const block = pem("\\n");
+    const m = scanString(block).find((x) => x.ruleId === "private-key")!;
+    expect(m.secret).toBe(block);
+  });
+
+  it("still warns on a truncated block (BEGIN without END)", () => {
+    const trunc = `-----BEGIN OPENSSH PRIVATE KEY-----\n${BODY}\n(no footer)`;
+    const m = scanString(trunc).find((x) => x.ruleId === "private-key")!;
+    expect(m.secret).toBe("-----BEGIN OPENSSH PRIVATE KEY-----");
+  });
+
+  it("scanSessionFile catches a multi-line PEM block spanning physical lines in a tool-result txt", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, statSync } = await import("node:fs");
+    const os = await import("node:os");
+    const dir = mkdtempSync(path.join(os.tmpdir(), "airgap-pem-"));
+    const projDir = path.join(dir, "-Users-tester-pem");
+    const sid = "55555555-5555-4555-8555-555555555555";
+    const sideDir = path.join(projDir, sid);
+    mkdirSync(path.join(sideDir, "tool-results"), { recursive: true });
+    const file = path.join(projDir, `${sid}.jsonl`);
+    writeFileSync(file, JSON.stringify({ type: "user", uuid: "u1", message: { role: "user", content: "see toolu_pem" } }) + "\n");
+    const tr = path.join(sideDir, "tool-results", "toolu_pem.txt");
+    writeFileSync(tr, `dumping key\n${pem("\n")}\ndone\n`);
+    const info: SessionInfo = {
+      source: "claude",
+      id: sid,
+      file,
+      cwd: "/Users/tester/pem",
+      project: "/Users/tester/pem",
+      mtimeMs: statSync(file).mtimeMs,
+      sizeBytes: statSync(file).size,
+      sidecars: { subagents: [], toolResults: [tr] },
+    };
+    const findings = await scanSessionFile(info);
+    const pk = findings.filter((f) => f.ruleId === "private-key");
+    expect(pk).toHaveLength(1);
+    expect(pk[0]!.secret).toContain("-----END RSA PRIVATE KEY-----");
+    expect(pk[0]!.sourceFile.endsWith("toolu_pem.txt")).toBe(true);
+  });
+
+  it("redaction removes the base64 body and the END marker, not just the header", () => {
+    const block = pem("\n");
+    const raw = JSON.stringify({ type: "user", message: { content: `key:\n${block}\ndone` } });
+    const rec: JsonlRecord = { raw, lineNo: 1, json: JSON.parse(raw) as Record<string, unknown> };
+    const result = redactRecords([rec], scanString);
+    const content = (result.records[0]!.json as { message: { content: string } }).message.content;
+    expect(content).not.toContain(BODY); // base64 body gone
+    expect(content).not.toContain("-----END RSA PRIVATE KEY-----"); // footer gone
+    expect(content).not.toContain("-----BEGIN RSA PRIVATE KEY-----"); // header gone
+    expect(content).toMatch(/PRIVATE-KEY-REDACTED-[0-9a-f]{6}/);
+  });
+});
+
+describe("F4: env-dump captures values containing spaces", () => {
+  it("captures a value with a space (passphrase) to end of line", () => {
+    const dump = "SECRET_PHRASE=correct horse battery staple\nAPI_HOST=10.0.0.1\nDB_NAME=prod";
+    const matches = scanString(dump).filter((m) => m.ruleId === "env-dump");
+    expect(matches.map((m) => m.secret)).toContain("SECRET_PHRASE=correct horse battery staple");
+  });
+
+  it("captures a quoted value with spaces whole", () => {
+    const dump = 'PASSWORD_STR="a b c d e f"\nAPI_HOST=10.0.0.1\nDB_NAME=prod';
+    const secrets = scanString(dump)
+      .filter((m) => m.ruleId === "env-dump")
+      .map((m) => m.secret);
+    expect(secrets).toContain('PASSWORD_STR="a b c d e f"');
+  });
+
+  it("redaction removes the whole spaced value, no trailing plaintext", () => {
+    const dump = "SECRET_PHRASE=correct horse battery staple\nAPI_HOST=10.0.0.1\nDB_NAME=prod";
+    const raw = JSON.stringify({ type: "user", message: { content: dump } });
+    const rec: JsonlRecord = { raw, lineNo: 1, json: JSON.parse(raw) as Record<string, unknown> };
+    const result = redactRecords([rec], scanString);
+    const content = (result.records[0]!.json as { message: { content: string } }).message.content;
+    expect(content).not.toContain("correct horse battery staple");
+    expect(content).not.toContain("battery"); // no residual tail after the first space
   });
 });
 

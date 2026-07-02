@@ -20,8 +20,11 @@ function isFalsePositive(secret: string): boolean {
   return /^(.)\1+$/.test(secret);
 }
 
-/** One env-looking line: VAR_NAME=value (per CONTRACTS.md env-dump rule). */
-const ENV_LINE = /^[A-Z][A-Z0-9_]{2,}=\S+/;
+/**
+ * One env-looking line: VAR_NAME=value to end of line (per CONTRACTS.md env-dump rule).
+ * F4: extends to `$` (trimmed) so values containing spaces are captured whole.
+ */
+const ENV_LINE = /^[A-Z][A-Z0-9_]{2,}=\S.*$/;
 /** Cheap gate before splitting a value into lines. */
 const ENV_HINT = /[A-Z][A-Z0-9_]{2,}=\S/;
 /** Newlines inside a scanned value may be real or the two-character literal `\n`. */
@@ -33,7 +36,9 @@ function envDumpMatches(value: string): RuleMatch[] {
   const hits: string[] = [];
   for (const part of value.split(LINE_SPLIT)) {
     const m = ENV_LINE.exec(part);
-    if (m && !isFalsePositive(m[0])) hits.push(m[0]);
+    if (!m) continue;
+    const secret = m[0].replace(/\s+$/, ""); // F4: trim trailing whitespace
+    if (!isFalsePositive(secret)) hits.push(secret);
   }
   if (hits.length < 3) return [];
   return hits.map((secret) => ({
@@ -117,19 +122,34 @@ export async function scanSessionFile(info: SessionInfo): Promise<Finding[]> {
   };
 
   const scanTextFile = async (file: string): Promise<void> => {
-    // env-dump needs cross-line counting: a tool-result file is one logical blob.
+    // A tool-result file is one logical blob. Two things need cross-line handling:
+    //  - env-dump: >=3 env lines counted across the whole file.
+    //  - multi-line secrets (F2 private-key PEM blocks) that span physical lines and
+    //    can't be matched line-by-line — scan the whole file text once for those.
+    const lines: string[] = [];
     const envHits: Array<{ secret: string; lineNo: number }> = [];
     for await (const { line, lineNo } of streamLines(file)) {
+      lines.push(line);
       for (const part of line.split(LINE_SPLIT)) {
         const em = ENV_LINE.exec(part);
-        if (em && !isFalsePositive(em[0])) envHits.push({ secret: em[0], lineNo });
+        if (!em) continue;
+        const secret = em[0].replace(/\s+$/, ""); // F4: trim trailing whitespace
+        if (!isFalsePositive(secret)) envHits.push({ secret, lineNo });
       }
-      if (!PREFILTER.test(line)) continue;
-      for (const m of scanString(line)) {
-        if (m.ruleId === "env-dump") continue; // handled at file level below
+    }
+
+    // File-level / block-level scan: run scanString on the whole text so multi-line
+    // secrets are caught. Locate each match's starting physical line for `lineNo`.
+    const fullText = lines.join("\n");
+    if (PREFILTER.test(fullText)) {
+      for (const m of scanString(fullText)) {
+        if (m.ruleId === "env-dump") continue; // env handled below (cross-line counting)
+        const idx = fullText.indexOf(m.secret);
+        const lineNo = idx < 0 ? 1 : fullText.slice(0, idx).split("\n").length;
         add(m, file, lineNo);
       }
     }
+
     if (envHits.length >= 3) {
       for (const hit of envHits) {
         add(

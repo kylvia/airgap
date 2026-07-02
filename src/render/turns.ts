@@ -1,4 +1,5 @@
 import type { JsonlRecord, SessionSource, Turn } from "../types.js";
+import { isCodexScaffold } from "../util/codex.js";
 
 /** tool_use 折叠为一行时 input 摘要的最大长度（字符） */
 const TOOL_SUMMARY_MAX = 80;
@@ -142,19 +143,6 @@ function extractClaudeTurns(records: JsonlRecord[]): Turn[] {
 }
 
 // ---------- Codex ----------
-
-const CODEX_SCAFFOLD_PREFIXES = [
-  "<user_instructions>",
-  "<environment_context>",
-  "<permissions instructions>",
-  "<ide_context>",
-  "# AGENTS.md instructions",
-];
-
-function isCodexScaffold(text: string): boolean {
-  const head = text.trimStart();
-  return CODEX_SCAFFOLD_PREFIXES.some((p) => head.startsWith(p));
-}
 
 function codexMessageText(content: unknown): string {
   if (!Array.isArray(content)) return "";

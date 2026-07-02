@@ -1,12 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as yazl from "yazl";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { assertSafeEntryPath, readPack, writePack } from "../src/ccpack.js";
+import type { SidecarContent } from "../src/ccpack.js";
 import { runOpen } from "../src/commands/open.js";
 import { runPack } from "../src/commands/pack.js";
-import { redactRecords } from "../src/redact.js";
+import { createRedactor } from "../src/redact.js";
 import { sliceSession } from "../src/slice.js";
 import { sha256String } from "../src/util/text.js";
 import type { RuleMatch, SessionInfo } from "../src/types.js";
@@ -16,24 +17,52 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), "airgap-ccpack-"));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
 const info: SessionInfo = writeFixtureSession(path.join(tmp, "home"));
-const PLACEHOLDER = `TEST-KEY-REDACTED-${sha256String(SECRET).slice(0, 6)}`;
 
 /** contract-shaped scanner mock (scanString signature) — no A 组 import */
 const fakeScan = vi.fn((s: string): RuleMatch[] =>
   s.includes(SECRET) ? [{ ruleId: "test-key", severity: "critical", secret: SECRET, preview: "sk-t…1234" }] : [],
 );
 
+const readText = async (file: string): Promise<string> =>
+  (await import("node:fs/promises")).readFile(file, "utf8");
+
+/** Build a pack the way runPack does: one shared redactor across transcript + sidecars. */
 async function buildPack(outFile: string) {
   const sliced = await sliceSession(info, {});
-  const redact = redactRecords(sliced.records, fakeScan);
-  const manifest = await writePack(outFile, sliced, redact, { toolVersion: "2.1.198" });
-  return { sliced, redact, manifest };
+  const redactor = createRedactor(fakeScan);
+  const records = redactor.redactRecords(sliced.records);
+  const sidecarContents: SidecarContent[] = [];
+  for (const f of sliced.sidecars.subagents) {
+    const base = path.basename(f);
+    const role = base.endsWith(".meta.json") ? "meta" : "subagent";
+    const text = await readText(f);
+    const lines = text.split("\n");
+    const had = text.endsWith("\n");
+    if (had) lines.pop();
+    const content =
+      lines
+        .map((line, i) => {
+          if (line.length === 0) return line;
+          const json = JSON.parse(line) as Record<string, unknown>;
+          return redactor.redactRecords([{ raw: line, lineNo: i + 1, json }])[0]!.raw;
+        })
+        .join("\n") + (had ? "\n" : "");
+    sidecarContents.push({ path: `subagents/${base}`, role, content });
+  }
+  for (const f of sliced.sidecars.toolResults) {
+    const base = path.basename(f);
+    sidecarContents.push({ path: `tool-results/${base}`, role: "tool-result", content: redactor.redactText(await readText(f)) });
+  }
+  const { annotations, reverseMap } = redactor.result();
+  const redact = { records, annotations, reverseMap };
+  const manifest = await writePack(outFile, sliced, redact, { toolVersion: "2.1.198", sidecarContents });
+  return { sliced, redact, manifest, placeholder: reverseMap[SECRET]! };
 }
 
 describe("writePack -> readPack roundtrip", () => {
   it("produces a manifest matching the contract shape", async () => {
     const out = path.join(tmp, "roundtrip.ccpack");
-    const { manifest } = await buildPack(out);
+    const { manifest, placeholder } = await buildPack(out);
 
     expect(manifest.specVersion).toBe(1);
     expect(manifest.producer).toMatch(/^airgap\//);
@@ -41,8 +70,11 @@ describe("writePack -> readPack roundtrip", () => {
     expect(manifest.title).toBe("Demo session title");
     expect(manifest.source).toEqual({ tool: "claude", toolVersion: "2.1.198", dialect: "claude-jsonl-tree/1" });
     expect(manifest.pathTokens).toEqual({ "{{PROJECT_ROOT}}": FIXTURE_CWD, "{{HOME}}": os.homedir() });
+    // F5: placeholder is a per-pack random token, not sha256(secret)-derived.
+    expect(placeholder).toMatch(/^TEST-KEY-REDACTED-[0-9a-f]{6}$/);
+    expect(placeholder).not.toContain(sha256String(SECRET).slice(0, 6));
     expect(manifest.redaction).toEqual([
-      { ruleId: "test-key", severity: "critical", placeholder: PLACEHOLDER, count: 1 },
+      { ruleId: "test-key", severity: "critical", placeholder, count: 1 },
     ]);
     expect(manifest.slice.keptRecords).toBe(13);
 
@@ -62,7 +94,7 @@ describe("writePack -> readPack roundtrip", () => {
 
   it("tokenizes project/home paths in contents, keeps secrets redacted, verifies sha256 on extract", async () => {
     const out = path.join(tmp, "extract.ccpack");
-    const { manifest } = await buildPack(out);
+    const { manifest, placeholder } = await buildPack(out);
     const { extract } = await readPack(out);
     const dest = path.join(tmp, "extracted");
     await extract(dest);
@@ -73,7 +105,7 @@ describe("writePack -> readPack roundtrip", () => {
     expect(transcript).not.toContain(FIXTURE_CWD);
     expect(transcript).not.toContain(os.homedir());
     expect(transcript).not.toContain(SECRET);
-    expect(transcript).toContain(PLACEHOLDER);
+    expect(transcript).toContain(placeholder);
     // metadata like sessionId is untouched by tokenization
     expect(transcript).toContain(SID);
 
@@ -187,7 +219,9 @@ describe("pack/open command smoke (--yes / --print-only, temp dirs only)", () =>
     const mapFile = path.join(fakeHome, ".airgap", "maps", "smoke.ccpack.json");
     expect(existsSync(mapFile)).toBe(true);
     expect(statSync(mapFile).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(readFileSync(mapFile, "utf8"))).toEqual({ [SECRET]: PLACEHOLDER });
+    const map = JSON.parse(readFileSync(mapFile, "utf8")) as Record<string, string>;
+    expect(Object.keys(map)).toEqual([SECRET]);
+    expect(map[SECRET]).toMatch(/^TEST-KEY-REDACTED-[0-9a-f]{6}$/);
   });
 
   it("runPack refuses --no-redact without --accept-risk", async () => {
@@ -251,5 +285,116 @@ describe("pack/open command smoke (--yes / --print-only, temp dirs only)", () =>
     expect(agentRec.sessionId).toBe(newSid); // was the old SID -> follows the fork
     expect(agentRec.cwd).toBe(targetProj);
     expect(existsSync(path.join(fakeHome, ".claude", "projects", munged, newSid, "tool-results", "toolu_01.txt"))).toBe(true);
+  });
+});
+
+describe("F1: sidecars are redacted, not bypassed", () => {
+  // three DISTINCT secrets, one per sidecar file kind + one shared across two files.
+  const SUB_SECRET = "sk-ant-SUBAGENTSECRETaaaabbbbcccc";
+  const META_SECRET = "ghp_METAONLY0000000000000000000000000000";
+  const TR_SECRET = "sk-ant-TOOLRESULTsecretxxxxyyyyzzzz";
+  const SHARED = "sk-ant-SHAREDacrossmainANDsidecar1234";
+
+  const multiScan = vi.fn((s: string): RuleMatch[] => {
+    const out: RuleMatch[] = [];
+    const push = (id: string, secret: string): void => {
+      if (s.includes(secret)) out.push({ ruleId: id, severity: "critical", secret, preview: "x" });
+    };
+    push("anthropic-key", SUB_SECRET);
+    push("github-token", META_SECRET);
+    push("anthropic-key", TR_SECRET);
+    push("anthropic-key", SHARED);
+    return out;
+  });
+
+  function writeSessionWithSidecarSecrets(baseDir: string): SessionInfo {
+    const sid = "44444444-4444-4444-8444-444444444444";
+    const projDir = path.join(baseDir, "-Users-tester-f1");
+    const sideDir = path.join(projDir, sid);
+    const subDir = path.join(sideDir, "subagents");
+    const trDir = path.join(sideDir, "tool-results");
+    for (const d of [subDir, trDir]) mkdirSync(d, { recursive: true });
+
+    const l = (o: Record<string, unknown>): string => JSON.stringify(o);
+    const file = path.join(projDir, `${sid}.jsonl`);
+    writeFileSync(
+      file,
+      [
+        l({ type: "user", uuid: "u1", parentUuid: null, sessionId: sid, cwd: FIXTURE_CWD, message: { role: "user", content: "go" } }),
+        // reference agent-f1 (pulls in its jsonl + meta) and toolu_f1 so slice keeps them.
+        l({ type: "assistant", uuid: "u2", parentUuid: "u1", sessionId: sid, message: { id: "m", role: "assistant", content: [{ type: "text", text: `main sees ${SHARED}; spawned agent-f1; see toolu_f1` }] } }),
+      ].join("\n") + "\n",
+    );
+
+    const subFile = path.join(subDir, "agent-f1.jsonl");
+    writeFileSync(
+      subFile,
+      l({ type: "user", uuid: "a1", parentUuid: null, sessionId: sid, message: { role: "user", content: `subagent used ${SUB_SECRET} and ${SHARED}` } }) + "\n",
+    );
+    const metaFile = path.join(subDir, "agent-f1.meta.json");
+    writeFileSync(metaFile, l({ agentId: "agent-f1", note: `meta has ${META_SECRET}` }) + "\n");
+
+    const trFile = path.join(trDir, "toolu_f1.txt");
+    writeFileSync(trFile, `tool output line\ntoken: ${TR_SECRET}\nmore output\n`);
+
+    return {
+      source: "claude",
+      id: sid,
+      file,
+      cwd: FIXTURE_CWD,
+      project: FIXTURE_CWD,
+      mtimeMs: statSync(file).mtimeMs,
+      sizeBytes: statSync(file).size,
+      sidecars: { subagents: [subFile, metaFile], toolResults: [trFile] },
+    };
+  }
+
+  it("no sidecar secret appears in any pack byte; manifest counts sidecar hits; shared secret consistent across files", async () => {
+    const home = path.join(tmp, "f1-home");
+    const sessionInfo = writeSessionWithSidecarSecrets(path.join(tmp, "f1-src"));
+    const out = path.join(tmp, "f1.ccpack");
+    await runPack(
+      { yes: true, out },
+      { discover: async () => [sessionInfo], scan: multiScan, home, cwd: FIXTURE_CWD, interactive: false, log: () => {} },
+    );
+
+    // every raw byte of the pack must be free of every plaintext secret
+    const packBytes = readFileSync(out).toString("latin1");
+    for (const s of [SUB_SECRET, META_SECRET, TR_SECRET, SHARED]) {
+      expect(packBytes.includes(s), `plaintext leaked: ${s}`).toBe(false);
+    }
+
+    const { manifest, extract } = await readPack(out);
+    // manifest.redaction accounts for sidecar-only secrets (META_SECRET lives only in meta.json).
+    // annotations are per-placeholder (per distinct secret), so sum counts per rule.
+    const rules = [...new Set(manifest.redaction.map((a) => a.ruleId))].sort();
+    expect(rules).toEqual(["anthropic-key", "github-token"]);
+    const countByRule = new Map<string, number>();
+    for (const a of manifest.redaction) countByRule.set(a.ruleId, (countByRule.get(a.ruleId) ?? 0) + a.count);
+    // anthropic-key total: SUB_SECRET(1) + SHARED(main 1 + subagent 1) + TR_SECRET(1) = 4
+    expect(countByRule.get("anthropic-key")).toBe(4);
+    // github-token (META_SECRET, sidecar-only): 1
+    expect(countByRule.get("github-token")).toBe(1);
+
+    const dest = path.join(tmp, "f1-out");
+    await extract(dest);
+    const transcript = readFileSync(path.join(dest, "transcript.jsonl"), "utf8");
+    const sub = readFileSync(path.join(dest, "subagents", "agent-f1.jsonl"), "utf8");
+    const meta = readFileSync(path.join(dest, "subagents", "agent-f1.meta.json"), "utf8");
+    const tr = readFileSync(path.join(dest, "tool-results", "toolu_f1.txt"), "utf8");
+
+    // SHARED gets the SAME placeholder in the main transcript and the subagent file.
+    const map = JSON.parse(readFileSync(path.join(home, ".airgap", "maps", "f1.ccpack.json"), "utf8")) as Record<string, string>;
+    const sharedPlaceholder = map[SHARED]!;
+    expect(sharedPlaceholder).toMatch(/^ANTHROPIC-KEY-REDACTED-[0-9a-f]{6}$/);
+    expect(transcript).toContain(sharedPlaceholder);
+    expect(sub).toContain(sharedPlaceholder);
+
+    // meta.json secret is redacted; its structure (agentId metadata) is intact
+    expect(meta).toContain(map[META_SECRET]!);
+    expect(JSON.parse(meta.trim()).agentId).toBe("agent-f1");
+    // tool-result text secret redacted
+    expect(tr).toContain(map[TR_SECRET]!);
+    expect(tr).toContain("more output");
   });
 });

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +27,15 @@ function airgapVersion(): string {
 
 export const PROJECT_ROOT_TOKEN = "{{PROJECT_ROOT}}";
 export const HOME_TOKEN = "{{HOME}}";
+
+/** An already-redacted sidecar file, ready to write into the pack. */
+export interface SidecarContent {
+  /** zip-relative path, e.g. "subagents/agent-aaa.jsonl" */
+  path: string;
+  role: "subagent" | "tool-result" | "meta";
+  /** file content AFTER redaction (F1) — writePack no longer reads the original off disk */
+  content: string;
+}
 
 /** token -> original absolute path, ordered so the longer/more specific path applies first. */
 function buildPathTokens(cwd: string | null, home: string): Array<[string, string]> {
@@ -73,16 +82,35 @@ export function assertSafeEntryPath(entryPath: string): void {
 }
 
 /**
+ * Tokenize an already-redacted sidecar payload. jsonl/json sidecars are tokenized
+ * per-record-line (string values only, metadata skipped); plain-text tool-results
+ * are tokenized as a whole blob.
+ */
+function tokenizeSidecarContent(content: string, role: SidecarContent["role"], tokens: Array<[string, string]>): string {
+  if (role === "tool-result") return applyTokensToText(content, tokens);
+  // subagent / meta: jsonl or json — tokenize line by line to preserve structure.
+  return content
+    .split("\n")
+    .map((line) => (line.length === 0 ? line : tokenizeRecordLine(line, tokens)))
+    .join("\n");
+}
+
+/**
  * Write a .ccpack (zip) with layout:
  *   manifest.json / transcript.jsonl / subagents/* / tool-results/*
  * Project/home absolute paths inside record contents are replaced with
  * {{PROJECT_ROOT}} / {{HOME}} tokens before writing.
+ *
+ * F1: sidecar contents are passed in ALREADY REDACTED by the caller (pack.ts shares
+ * one redactor across the main transcript and every sidecar). writePack only applies
+ * path tokenization on top — it never reads sidecar originals off disk anymore, so no
+ * plaintext secret can bypass redaction into the pack.
  */
 export async function writePack(
   outFile: string,
   sliced: SlicedSession,
   redact: RedactResult,
-  extra: { toolVersion: string | null },
+  extra: { toolVersion: string | null; sidecarContents: SidecarContent[] },
 ): Promise<PackManifest> {
   const home = os.homedir();
   const tokens = buildPathTokens(sliced.info.cwd, home);
@@ -95,29 +123,18 @@ export async function writePack(
   zip.addBuffer(transcriptBuf, "transcript.jsonl");
   entries.push({ path: "transcript.jsonl", sha256: sha256Buffer(transcriptBuf), role: "transcript" });
 
-  for (const file of sliced.sidecars.subagents) {
-    const base = path.basename(file);
-    const zipPath = `subagents/${base}`;
-    const text = await readFile(file, "utf8");
-    const buf = Buffer.from(applyTokensToText(text, tokens), "utf8");
-    zip.addBuffer(buf, zipPath);
-    entries.push({ path: zipPath, sha256: sha256Buffer(buf), role: base.endsWith(".meta.json") ? "meta" : "subagent" });
+  for (const sc of extra.sidecarContents) {
+    const buf = Buffer.from(tokenizeSidecarContent(sc.content, sc.role, tokens), "utf8");
+    zip.addBuffer(buf, sc.path);
+    entries.push({ path: sc.path, sha256: sha256Buffer(buf), role: sc.role });
   }
 
-  for (const file of sliced.sidecars.toolResults) {
-    const base = path.basename(file);
-    const zipPath = `tool-results/${base}`;
-    const text = await readFile(file, "utf8");
-    const buf = Buffer.from(applyTokensToText(text, tokens), "utf8");
-    zip.addBuffer(buf, zipPath);
-    entries.push({ path: zipPath, sha256: sha256Buffer(buf), role: "tool-result" });
-  }
-
-  // title from a carried summary record, when present
+  // title from a carried summary record, when present. 附带: tokenize it before it
+  // lands in the manifest, otherwise an absolute path (with the username) leaks in clear.
   let title: string | undefined;
   for (const r of redact.records) {
     if (r.json?.type === "summary" && typeof r.json.summary === "string") {
-      title = r.json.summary;
+      title = applyTokensToText(r.json.summary, tokens);
       break;
     }
   }

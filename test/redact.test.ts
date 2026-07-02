@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { redactRecords } from "../src/redact.js";
+import { createRedactor, redactRecords } from "../src/redact.js";
 import { sha256String } from "../src/util/text.js";
 import type { JsonlRecord, RuleMatch } from "../src/types.js";
 
@@ -49,35 +49,52 @@ function makeRecords(): JsonlRecord[] {
   ];
 }
 
-const PLACEHOLDER = `ANTHROPIC-KEY-REDACTED-${sha256String(SECRET).slice(0, 6)}`;
-const PLACEHOLDER2 = `GITHUB-TOKEN-REDACTED-${sha256String(SECRET2).slice(0, 6)}`;
+/** F5: placeholders are per-pack random, of the shape <RULE>-REDACTED-<6 hex>. */
+const PLACEHOLDER_RE = /^[A-Z-]+-REDACTED-[0-9a-f]{6}$/;
 
 describe("redactRecords", () => {
-  it("replaces secrets in string values with the contract placeholder format", () => {
+  it("replaces secrets in string values with the contract placeholder shape", () => {
     const result = redactRecords(makeRecords(), fakeScan);
-    expect(PLACEHOLDER).toMatch(/^ANTHROPIC-KEY-REDACTED-[0-9a-f]{6}$/);
+    const placeholder = result.reverseMap[SECRET]!;
+    const placeholder2 = result.reverseMap[SECRET2]!;
+    expect(placeholder).toMatch(/^ANTHROPIC-KEY-REDACTED-[0-9a-f]{6}$/);
+    expect(placeholder2).toMatch(/^GITHUB-TOKEN-REDACTED-[0-9a-f]{6}$/);
     const r1 = result.records[0]!;
     const msg = (r1.json as { message: { content: Array<Record<string, unknown>> } }).message;
-    expect(msg.content[0]!.thinking).toBe(`the key is ${PLACEHOLDER} yes ${PLACEHOLDER}`);
-    expect((msg.content[1]!.input as { command: string }).command).toBe(`echo ${PLACEHOLDER2}`);
+    expect(msg.content[0]!.thinking).toBe(`the key is ${placeholder} yes ${placeholder}`);
+    expect((msg.content[1]!.input as { command: string }).command).toBe(`echo ${placeholder2}`);
     // re-serialized raw reflects the replacement
-    expect(r1.raw).toContain(PLACEHOLDER);
+    expect(r1.raw).toContain(placeholder);
     expect(r1.raw).not.toContain(`the key is ${SECRET}`);
+  });
+
+  it("F5: placeholder leaks no info about the secret and is not the sha256 prefix", () => {
+    const result = redactRecords(makeRecords(), fakeScan);
+    const placeholder = result.reverseMap[SECRET]!;
+    expect(placeholder).toMatch(PLACEHOLDER_RE);
+    // the old scheme embedded sha256(secret)[:6]; the new one must not.
+    expect(placeholder).not.toContain(sha256String(SECRET).slice(0, 6));
+    // and same secret is consistent within the pack
+    const r1 = result.records[0]!;
+    const r2 = result.records[1]!;
+    expect(r1.raw).toContain(placeholder);
+    expect(r2.raw).toContain(placeholder);
   });
 
   it("same secret maps to the same placeholder everywhere (consistency mapping)", () => {
     const result = redactRecords(makeRecords(), fakeScan);
+    const placeholder = result.reverseMap[SECRET]!;
     const r2 = result.records[1]!;
     const stdout = (r2.json as { toolUseResult: { stdout: string } }).toolUseResult.stdout;
-    expect(stdout).toBe(`stdout had ${PLACEHOLDER}`);
+    expect(stdout).toBe(`stdout had ${placeholder}`);
     const content = (r2.json as { message: { content: Array<Record<string, unknown>> } }).message.content[0]!;
-    expect(content.content).toBe(`stdout had ${PLACEHOLDER}`);
+    expect(content.content).toBe(`stdout had ${placeholder}`);
   });
 
   it("never touches metadata: uuid/parentUuid/tool_use_id/signature/tool_use id survive byte-for-byte", () => {
     const before = makeRecords();
     const result = redactRecords(before, fakeScan);
-    const r1 = result.records[0]! .json as {
+    const r1 = result.records[0]!.json as {
       uuid: string;
       parentUuid: null;
       sessionId: string;
@@ -106,16 +123,18 @@ describe("redactRecords", () => {
 
   it("produces annotations with occurrence counts and a secret->placeholder reverse map", () => {
     const result = redactRecords(makeRecords(), fakeScan);
+    const placeholder = result.reverseMap[SECRET]!;
+    const placeholder2 = result.reverseMap[SECRET2]!;
     const byRule = new Map(result.annotations.map((a) => [a.ruleId, a]));
     // SECRET: 2x in thinking + 1x tool_result content + 1x toolUseResult.stdout = 4
     expect(byRule.get("anthropic-key")).toEqual({
       ruleId: "anthropic-key",
       severity: "critical",
-      placeholder: PLACEHOLDER,
+      placeholder,
       count: 4,
     });
     expect(byRule.get("github-token")?.count).toBe(1);
-    expect(result.reverseMap).toEqual({ [SECRET]: PLACEHOLDER, [SECRET2]: PLACEHOLDER2 });
+    expect(result.reverseMap).toEqual({ [SECRET]: placeholder, [SECRET2]: placeholder2 });
   });
 
   it("no matches -> zero annotations, empty reverse map", () => {
@@ -123,5 +142,55 @@ describe("redactRecords", () => {
     expect(result.annotations).toEqual([]);
     expect(result.reverseMap).toEqual({});
     expect(result.records.map((r) => r.raw)).toEqual(makeRecords().map((r) => r.raw));
+  });
+});
+
+describe("F3: containment overlaps + fail-closed re-scan", () => {
+  const SHORT = "sk-ant-PREFIX0000";
+  const LONG = "sk-ant-PREFIX0000TAILAAAABBBBCCCC";
+
+  // scanner reports BOTH the short (prefix) and long secret for a value that contains
+  // the long one — like anthropic-key hitting a prefix while another rule hits a superset.
+  const overlapScan = (s: string): RuleMatch[] => {
+    const out: RuleMatch[] = [];
+    if (s.includes(LONG)) out.push({ ruleId: "long-rule", severity: "critical", secret: LONG, preview: "l" });
+    if (s.includes(SHORT)) out.push({ ruleId: "short-rule", severity: "critical", secret: SHORT, preview: "s" });
+    return out;
+  };
+
+  it("redacts the LONGER secret fully, leaving no tail of the shorter one", () => {
+    const records = [rec(1, { type: "user", message: { content: `token=${LONG} end` } })];
+    const result = redactRecords(records, overlapScan);
+    const content = (result.records[0]!.json as { message: { content: string } }).message.content;
+    // no plaintext of either secret remains
+    expect(content).not.toContain(LONG);
+    expect(content).not.toContain("TAILAAAABBBBCCCC");
+    // and re-scanning the output is clean (defense in depth held)
+    expect(overlapScan(content)).toEqual([]);
+  });
+
+  it("throws fail-closed when a residual secret survives redaction", () => {
+    // pathological scanner: reports SHORT but never LONG, so replacing SHORT still leaves
+    // the LONG string dirty on a re-scan (simulating an incomplete replacement).
+    const buggyScan = (s: string): RuleMatch[] =>
+      s.includes("STILL-HERE-SECRET") ? [{ ruleId: "x", severity: "critical", secret: "SOMETHING-ELSE", preview: "x" }] : [];
+    const records = [rec(1, { type: "user", message: { content: "STILL-HERE-SECRET plus SOMETHING-ELSE" } })];
+    expect(() => redactRecords(records, buggyScan)).toThrow(/fail-closed/);
+  });
+});
+
+describe("createRedactor: shared consistency across records + text", () => {
+  it("gives the same placeholder to a secret found in both records and sidecar text", () => {
+    const redactor = createRedactor(fakeScan);
+    const outRecords = redactor.redactRecords([rec(1, { type: "user", message: { content: `a ${SECRET}` } })]);
+    const outText = redactor.redactText(`sidecar blob with ${SECRET} inside`);
+    const { reverseMap, annotations } = redactor.result();
+    const placeholder = reverseMap[SECRET]!;
+    expect(placeholder).toMatch(PLACEHOLDER_RE);
+    expect((outRecords[0]!.json as { message: { content: string } }).message.content).toContain(placeholder);
+    expect(outText).toContain(placeholder);
+    expect(outText).not.toContain(SECRET);
+    // annotation count spans both surfaces
+    expect(annotations.find((a) => a.ruleId === "anthropic-key")?.count).toBe(2);
   });
 });

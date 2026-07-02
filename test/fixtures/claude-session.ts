@@ -218,6 +218,121 @@ export function writeUnclosedSession(baseDir: string): SessionInfo {
   };
 }
 
+/**
+ * Codex rollout with scaffold messages (F13): two role=user scaffold response_items
+ * (environment_context + AGENTS.md) that must NOT count as tail turn boundaries, plus
+ * N real user turns. Also a function_call whose output sits after the last real turn's
+ * boundary to exercise call_id pairing back-fill.
+ */
+export function writeCodexScaffoldSession(baseDir: string): SessionInfo {
+  const dir = path.join(baseDir, "codex", "2026", "07", "02");
+  mkdirSync(dir, { recursive: true });
+  const id = "44444444-4444-4444-8444-444444444444";
+  const file = path.join(dir, `rollout-2026-07-02T00-00-00-${id}.jsonl`);
+  const l = (o: Record<string, unknown>): string => JSON.stringify(o);
+  const um = (text: string): Record<string, unknown> => ({
+    type: "response_item",
+    payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+  });
+  const am = (text: string): Record<string, unknown> => ({
+    type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
+  });
+  const lines = [
+    l({ type: "session_meta", payload: { id, cwd: FIXTURE_CWD, cli_version: "0.99.0" } }),
+    l(um("<environment_context>\ncwd: /x\n</environment_context>")), // scaffold, not a turn
+    l(um("# AGENTS.md instructions\nbe nice")), // scaffold, not a turn
+    l(um("real turn one")),
+    l(am("answer one")),
+    l(um("real turn two")),
+    l({ ...am(""), payload: { type: "function_call", name: "shell", call_id: "cc1", arguments: "{}" } }),
+    l(um("real turn three")),
+    l({ ...am(""), payload: { type: "function_call_output", call_id: "cc1", output: "ok" } }),
+    l(am("answer three")),
+  ];
+  writeFileSync(file, lines.join("\n") + "\n");
+  return {
+    source: "codex",
+    id,
+    file,
+    cwd: FIXTURE_CWD,
+    project: FIXTURE_CWD,
+    mtimeMs: statSync(file).mtimeMs,
+    sizeBytes: statSync(file).size,
+    sidecars: { subagents: [], toolResults: [] },
+  };
+}
+
+/**
+ * Session where a subagent transcript references an *externalized* tool-result that the main
+ * transcript never mentions (F14). Main transcript references subagent agent-bbb via a
+ * tool_result; agent-bbb.jsonl in turn references toolu_88.txt. Two-phase filterSidecars must
+ * keep toolu_88.txt even though the main transcript never names it.
+ */
+export function writeSubagentRefSession(baseDir: string): SessionInfo {
+  const projDir = path.join(baseDir, "-Users-tester-subref");
+  const sid = "55555555-5555-4555-8555-555555555555";
+  const sideDir = path.join(projDir, sid);
+  mkdirSync(path.join(sideDir, "subagents"), { recursive: true });
+  mkdirSync(path.join(sideDir, "tool-results"), { recursive: true });
+  const file = path.join(projDir, `${sid}.jsonl`);
+  const l = (o: Record<string, unknown>): string => JSON.stringify(o);
+  const lines = [
+    l(base({ type: "user", uuid: "r1", sessionId: sid, message: { role: "user", content: "start" } })),
+    l(
+      base({
+        type: "assistant",
+        uuid: "r2",
+        parentUuid: "r1",
+        sessionId: sid,
+        message: { id: "rm1", role: "assistant", content: [{ type: "tool_use", id: "toolu_77", name: "Task", input: { prompt: "sub" } }] },
+      }),
+    ),
+    l(
+      base({
+        type: "user",
+        uuid: "r3",
+        parentUuid: "r2",
+        sessionId: sid,
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_77", content: "subagent agent-bbb finished" }] },
+        toolUseResult: { agentId: "agent-bbb" },
+        sourceToolAssistantUUID: "r2",
+      }),
+    ),
+    l(base({ type: "assistant", uuid: "r4", parentUuid: "r3", sessionId: sid, message: { id: "rm2", role: "assistant", content: [{ type: "text", text: "done" }] } })),
+  ];
+  writeFileSync(file, lines.join("\n") + "\n");
+
+  // subagent jsonl references toolu_88 — a tool-result the MAIN transcript never mentions
+  const agentJsonl = path.join(sideDir, "subagents", "agent-bbb.jsonl");
+  writeFileSync(
+    agentJsonl,
+    JSON.stringify({
+      type: "user",
+      uuid: "b1",
+      parentUuid: null,
+      sessionId: sid,
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_88", content: "see toolu_88.txt" }] },
+    }) + "\n",
+  );
+  const tr = path.join(sideDir, "tool-results", "toolu_88.txt");
+  writeFileSync(tr, "externalized big output referenced only by the subagent\n");
+  // an unreferenced tool-result that must be dropped
+  const trUnref = path.join(sideDir, "tool-results", "toolu_99.txt");
+  writeFileSync(trUnref, "nobody references this\n");
+
+  return {
+    source: "claude",
+    id: sid,
+    file,
+    cwd: FIXTURE_CWD,
+    project: FIXTURE_CWD,
+    mtimeMs: statSync(file).mtimeMs,
+    sizeBytes: statSync(file).size,
+    sidecars: { subagents: [agentJsonl], toolResults: [tr, trUnref] },
+  };
+}
+
 /** Minimal codex rollout: session_meta + two user turns. */
 export function writeCodexSession(baseDir: string): SessionInfo {
   const dir = path.join(baseDir, "codex", "2026", "07", "01");

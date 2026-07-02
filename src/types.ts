@@ -91,6 +91,8 @@ export interface SliceReport {
   toolResultFiles: number;
   /** true when every tool_use has a matching tool_result inside the slice */
   closureComplete: boolean;
+  /** true when a retained compact summary was re-parented as the slice's active root (F12) */
+  compactSummaryRerooted?: boolean;
 }
 
 export interface SlicedSession {

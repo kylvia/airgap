@@ -28,10 +28,12 @@ Node ≥18，TS strict。测试用 vitest，放 `test/`，fixtures 放 `test/fix
   - `export async function sliceSession(info: SessionInfo, opts: SliceOptions): Promise<SlicedSession>`
   - 闭包规则见下"Claude JSONL 结构"。tail=N：保留最后 N 个 prompt 链（按 user 类型且非 tool_result 承载记录分界）
 - `src/redact.ts`
-  - `export function redactRecords(records: JsonlRecord[], scan: (s: string) => RuleMatch[]): RedactResult`
-  - 一致性映射：同一 secret → 同一占位符 `<ruleId 大写>-REDACTED-<sha256(secret) 前 6 位>`；只通过 `walkStrings`（METADATA_KEYS）改字符串值；改后重新序列化到 `raw`
+  - `export function redactRecords(records: JsonlRecord[], scan: (s: string) => RuleMatch[]): RedactResult`（保留，内部走 createRedactor）
+  - `export function createRedactor(scan): Redactor` — 共享一致性映射，`.redactRecords(records)` / `.redactText(text)` / `.result()`，主 transcript 与任意 sidecar 同 secret 同占位符（F1）
+  - 一致性映射：同一 secret → 同一占位符 `<ruleId 大写>-REDACTED-<per-pack 随机 6 位 hex>`（F5：与 secret 无关、包内一致、跨包不一致，占位符对明文零信息泄露）；只通过 `walkStrings`（METADATA_KEYS）改字符串值；改后重新序列化到 `raw`
+  - F3 防御纵深：按 secret 长度降序替换；改写后再 scan 一遍，仍命中则 fail-closed 抛错拒绝写包
 - `src/ccpack.ts`
-  - `export async function writePack(outFile: string, sliced: SlicedSession, redact: RedactResult, extra: { toolVersion: string | null }): Promise<PackManifest>`
+  - `export async function writePack(outFile: string, sliced: SlicedSession, redact: RedactResult, extra: { toolVersion: string | null; sidecarContents: Array<{ path: string; role: "subagent"|"tool-result"|"meta"; content: string }> }): Promise<PackManifest>`（F1：sidecar 内容由调用方脱敏后传入，writePack 不再读原文件）
   - `export async function readPack(file: string): Promise<{ manifest: PackManifest; extract(destDir: string): Promise<void> }>`（yauzl 读，防 zip-slip：拒绝绝对路径与 `..`）
   - zip 内布局：`manifest.json`、`transcript.jsonl`、`subagents/*`、`tool-results/*`
   - 路径 token：写包前把记录内容中的项目绝对路径→`{{PROJECT_ROOT}}`、home→`{{HOME}}`（只在内容字符串里替换，同样走 walkStrings）
@@ -94,12 +96,12 @@ Node ≥18，TS strict。测试用 vitest，放 `test/`，fixtures 放 `test/fix
 | stripe-key | critical | `(sk\|rk)_live_[0-9a-zA-Z]{24,}` |
 | npm-token | high | `npm_[A-Za-z0-9]{36}` |
 | telegram-bot | high | `[0-9]{8,10}:AA[A-Za-z0-9_-]{33}` |
-| private-key | critical | `-----BEGIN (RSA \|EC \|OPENSSH \|DSA \|PGP )?PRIVATE KEY` |
+| private-key | critical | 整块 `-----BEGIN (RSA\|EC\|OPENSSH\|DSA\|PGP )?PRIVATE KEY-----[\s\S]*?-----END …-----`（含 base64 密钥体与 END），外加 header-only 兜底匹配截断块 |
 | jwt | medium | `eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}` |
 | url-credentials | high | `[a-z][a-z0-9+.-]*://[^/\s:@'"]{3,}:[^/\s:@'"]{3,}@` |
 | bearer-token | medium | `(?i)bearer\s+[A-Za-z0-9._~+/-]{25,}`（值须熵 > 3.5） |
 | generic-assignment | medium | `(?i)(api[_-]?key\|secret\|token\|passwd\|password)['"]?\s*[=:]\s*['"]?[A-Za-z0-9_./+=-]{16,}`（值须熵 > 3.5） |
-| env-dump | high | 一个字符串值内 ≥3 行匹配 `^[A-Z][A-Z0-9_]{2,}=\S+`（注意 raw 里换行是 `\n` 字面量或真实换行） |
+| env-dump | high | 一个字符串值内 ≥3 行匹配 `^[A-Z][A-Z0-9_]{2,}=\S.*$`（匹配到行尾，含空格/带引号的值整值被脱；注意 raw 里换行是 `\n` 字面量或真实换行） |
 
 假阳性守卫（scanString 内统一）：命中值包含 `REDACTED`/`EXAMPLE`/`example`/`your-`/`xxxx`/`****`/`<`、或整体是重复字符时丢弃。
 
