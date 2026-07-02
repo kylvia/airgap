@@ -1,0 +1,4 @@
+node_modules/
+dist/
+*.ccpack
+.DS_Store
