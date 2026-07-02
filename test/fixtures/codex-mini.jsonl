@@ -1,0 +1,15 @@
+{"timestamp":"2026-07-02T12:00:00.000Z","type":"session_meta","payload":{"id":"019f0000-aaaa-bbbb-cccc-000000000001","timestamp":"2026-07-02T12:00:00.000Z","cwd":"/tmp/demo","cli_version":"0.0.1"}}
+{"timestamp":"2026-07-02T12:00:01.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>sandbox stuff</permissions instructions>"}]}}
+{"timestamp":"2026-07-02T12:00:01.500Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>AGENTS.md 的内容，属于脚手架不该成为一轮</user_instructions>"}]}}
+{"timestamp":"2026-07-02T12:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"查一下 8080 端口被谁占了"}]}}
+{"timestamp":"2026-07-02T12:00:03.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}
+{"timestamp":"2026-07-02T12:00:04.000Z","type":"turn_context","payload":{"turn_id":"t1","cwd":"/tmp/demo"}}
+{"timestamp":"2026-07-02T12:00:05.000Z","type":"response_item","payload":{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"需要用 lsof 查端口"}],"encrypted_content":"xxx"}}
+{"timestamp":"2026-07-02T12:00:06.000Z","type":"response_item","payload":{"type":"function_call","id":"fc_1","name":"exec_command","arguments":"{\"cmd\":\"lsof -i :8080\"}"}}
+{"timestamp":"2026-07-02T12:00:07.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"node 1234"}}
+{"timestamp":"2026-07-02T12:00:08.000Z","type":"response_item","payload":{"type":"message","id":"msg_a1","role":"assistant","content":[{"type":"output_text","text":"8080 被 node（pid 1234）占用。"}]}}
+{"timestamp":"2026-07-02T12:01:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"把它杀掉"}]}}
+{"timestamp":"2026-07-02T12:01:01.000Z","type":"response_item","payload":{"type":"reasoning","id":"rs_2","summary":[],"encrypted_content":"yyy"}}
+{"timestamp":"2026-07-02T12:01:02.000Z","type":"response_item","payload":{"type":"custom_tool_call","id":"ctc_1","call_id":"call_2","name":"apply_patch","input":"*** Begin Patch ***"}}
+{"timestamp":"2026-07-02T12:01:03.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_2","output":"ok"}}
+{"timestamp":"2026-07-02T12:01:04.000Z","type":"response_item","payload":{"type":"message","id":"msg_a2","role":"assistant","content":[{"type":"output_text","text":"已杀掉进程。"}]}}

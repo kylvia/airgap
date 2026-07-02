@@ -1,0 +1,141 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { sliceSession } from "../src/slice.js";
+import {
+  writeCodexSession,
+  writeFixtureSession,
+  writeUnclosedSession,
+} from "./fixtures/claude-session.js";
+
+const tmp = mkdtempSync(path.join(os.tmpdir(), "airgap-slice-"));
+afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+const info = writeFixtureSession(path.join(tmp, "full"));
+
+function uuidsOf(records: Array<{ json: Record<string, unknown> | null }>): string[] {
+  return records.map((r) => r.json?.uuid).filter((u): u is string => typeof u === "string");
+}
+
+describe("sliceSession (claude, full)", () => {
+  it("keeps the whole main chain plus its summary, drops session-state noise", async () => {
+    const sliced = await sliceSession(info, {});
+    const uuids = uuidsOf(sliced.records);
+    expect(uuids).toEqual(["u1", "u2", "u3", "u3b", "u4", "u5", "u6", "u7", "u8", "u8b", "u9", "u10"]);
+    // summary record has no uuid but is carried (leafUuid u10 in slice)
+    expect(sliced.records.some((r) => r.json?.type === "summary")).toBe(true);
+    expect(sliced.report.totalRecords).toBe(17);
+    expect(sliced.report.keptRecords).toBe(13);
+    expect(sliced.report.droppedTypes).toEqual({
+      mode: 1,
+      "file-history-snapshot": 1,
+      user: 1, // sidechain record
+      progress: 1,
+    });
+    expect(sliced.report.toolUsePairs).toBe(2);
+    expect(sliced.report.closureComplete).toBe(true);
+  });
+
+  it("carries every referenced sidecar file", async () => {
+    const sliced = await sliceSession(info, {});
+    expect(sliced.report.subagentFiles).toBe(2); // agent-aaa.jsonl + agent-aaa.meta.json
+    expect(sliced.report.toolResultFiles).toBe(2);
+    expect(sliced.sidecars.toolResults.map((f) => path.basename(f)).sort()).toEqual(["toolu_01.txt", "toolu_02.txt"]);
+  });
+
+  it("keeps records in original file order with original raw for untouched lines", async () => {
+    const sliced = await sliceSession(info, {});
+    const lineNos = sliced.records.map((r) => r.lineNo);
+    expect([...lineNos].sort((a, b) => a - b)).toEqual(lineNos);
+    const u5 = sliced.records.find((r) => r.json?.uuid === "u5");
+    expect(u5?.raw).toContain("answer one with token");
+    expect(u5 && JSON.parse(u5.raw).parentUuid).toBe("u4");
+  });
+});
+
+describe("sliceSession tail=N", () => {
+  it("tail=1: starts at the last user prompt, pulls cross-boundary tool pair back in, keeps compact summary", async () => {
+    const sliced = await sliceSession(info, { tail: 1 });
+    const uuids = uuidsOf(sliced.records);
+    // u8b is the last prompt; u9's tool_result forced u8 (its tool_use) back in;
+    // u6 (isCompactSummary) is retained although it sits before the cut.
+    expect(uuids).toEqual(["u6", "u8", "u8b", "u9", "u10"]);
+    expect(sliced.report.toolUsePairs).toBe(1);
+    expect(sliced.report.closureComplete).toBe(true);
+
+    // heads whose parent fell outside the slice are re-rooted
+    const byUuid = new Map(sliced.records.map((r) => [r.json?.uuid, r]));
+    expect(byUuid.get("u6")?.json?.parentUuid).toBeNull();
+    expect(byUuid.get("u8")?.json?.parentUuid).toBeNull();
+    expect(byUuid.get("u8b")?.json?.parentUuid).toBe("u8");
+    // re-rooting is reflected in raw too
+    expect(JSON.parse(byUuid.get("u8")?.raw ?? "{}").parentUuid).toBeNull();
+  });
+
+  it("tail=1: only referenced sidecars are carried", async () => {
+    const sliced = await sliceSession(info, { tail: 1 });
+    expect(sliced.sidecars.toolResults.map((f) => path.basename(f))).toEqual(["toolu_02.txt"]);
+    expect(sliced.report.toolResultFiles).toBe(1);
+    expect(sliced.report.subagentFiles).toBe(2); // agent-aaa referenced by u9
+  });
+
+  it("tail=3: closure expansion never splits a message.id group (m1 spans two records)", async () => {
+    const sliced = await sliceSession(info, { tail: 3 });
+    const uuids = uuidsOf(sliced.records);
+    // cut lands at u3b; u4's tool_result pulls u3 in, and u3's message.id m1 pulls u2 in
+    expect(uuids).toEqual(["u2", "u3", "u3b", "u4", "u5", "u6", "u7", "u8", "u8b", "u9", "u10"]);
+    const byUuid = new Map(sliced.records.map((r) => [r.json?.uuid, r]));
+    expect(byUuid.get("u2")?.json?.parentUuid).toBeNull(); // new head
+    expect(byUuid.get("u3")?.json?.parentUuid).toBe("u2"); // group intact
+    expect(sliced.report.toolUsePairs).toBe(2);
+    expect(sliced.report.closureComplete).toBe(true);
+  });
+
+  it("tail larger than available prompts keeps everything", async () => {
+    const sliced = await sliceSession(info, { tail: 99 });
+    expect(sliced.report.keptRecords).toBe(13);
+  });
+});
+
+describe("sliceSession stripThinking", () => {
+  it("removes thinking blocks (and their signatures) without touching uuids or tool_use blocks", async () => {
+    const sliced = await sliceSession(info, { stripThinking: true });
+    const u2 = sliced.records.find((r) => r.json?.uuid === "u2");
+    expect(u2).toBeDefined();
+    expect(u2?.raw).not.toContain("SIGSIGSIG");
+    expect(u2?.raw).not.toContain('"thinking"');
+    const msg = (u2?.json as { message: { id: string; content: unknown[] } }).message;
+    expect(msg.id).toBe("m1");
+    expect(msg.content).toEqual([]);
+    const u3 = sliced.records.find((r) => r.json?.uuid === "u3");
+    expect(u3?.raw).toContain("toolu_01"); // tool_use untouched
+  });
+});
+
+describe("sliceSession closure failure tolerance", () => {
+  it("reports closureComplete=false when a tool_use has no result anywhere, instead of throwing", async () => {
+    const unclosed = writeUnclosedSession(path.join(tmp, "unclosed"));
+    const sliced = await sliceSession(unclosed, {});
+    expect(uuidsOf(sliced.records)).toEqual(["x1", "x2"]);
+    expect(sliced.report.closureComplete).toBe(false);
+    expect(sliced.report.toolUsePairs).toBe(0);
+  });
+});
+
+describe("sliceSession (codex, linear)", () => {
+  it("keeps session_meta and applies tail by user messages", async () => {
+    const codex = writeCodexSession(path.join(tmp, "codex"));
+    const full = await sliceSession(codex, {});
+    expect(full.report.keptRecords).toBe(7);
+    expect(full.report.toolUsePairs).toBe(1);
+    expect(full.report.closureComplete).toBe(true);
+
+    const tail1 = await sliceSession(codex, { tail: 1 });
+    expect(tail1.records[0]?.json?.type).toBe("session_meta");
+    expect(tail1.report.keptRecords).toBe(3); // meta + q2 + a2
+    const texts = tail1.records.map((r) => r.raw).join("\n");
+    expect(texts).toContain("codex q2");
+    expect(texts).not.toContain("codex q1");
+  });
+});
