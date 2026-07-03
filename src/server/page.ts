@@ -68,8 +68,7 @@ export function renderPage(defaultSession?: string): string {
     <button data-a="download" data-f="png">下载 PNG</button>
     <button data-a="clipboard" data-f="md">复制 Markdown</button>
     <button data-a="save" data-f="png">存桌面</button>
-    <button data-a="shortcut" data-f="png">快捷指令</button>
-    <span class="status" id="status">勾选左侧轮次，右侧实时预览，选好点「复制长图」发微信。</span>
+    <span class="status" id="status">勾选左侧轮次，右侧实时预览，点「复制长图」→ 切微信 Cmd-V 粘贴发送。</span>
     <button id="done">完成关闭</button>
   </footer>
 <script>

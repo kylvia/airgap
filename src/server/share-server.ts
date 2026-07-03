@@ -41,7 +41,7 @@ interface SessionDetail {
   turns: TurnData[];
 }
 
-type ExportAction = "clipboard" | "save" | "download" | "shortcut";
+type ExportAction = "clipboard" | "save" | "download";
 type ExportFormat = "png" | "html" | "md";
 
 interface ExportBody {
@@ -126,17 +126,6 @@ async function pngToClipboard(pngPath: string): Promise<void> {
   await run("osascript", ["-e", script]);
 }
 
-async function readShortcutName(): Promise<string | null> {
-  try {
-    const cfg = JSON.parse(await readFile(path.join(os.homedir(), ".airgap", "config.json"), "utf8")) as {
-      shortcutName?: string;
-    };
-    return cfg.shortcutName?.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
 interface ExportResult {
   ok: boolean;
   message: string;
@@ -193,23 +182,6 @@ async function handleExport(body: ExportBody): Promise<ExportResult> {
     const png = await renderPng(turns, title, date);
     await pngToClipboard(png);
     return { ok: true, message: "长图已复制到剪贴板，切到微信选好聊天，Cmd-V 粘贴发送。" };
-  }
-
-  // 快捷指令一键：需用户预建
-  if (body.action === "shortcut") {
-    if (!isMac) return { ok: false, message: "快捷指令仅 macOS 支持。" };
-    const name = await readShortcutName();
-    if (!name) {
-      return {
-        ok: false,
-        message:
-          "还没配快捷指令。在「快捷指令」app 里建一个接收图片、做固定动作（如存相册）的快捷指令，" +
-          '然后写入 ~/.airgap/config.json：{"shortcutName":"你的快捷指令名"}，再点这里。',
-      };
-    }
-    const png = await renderPng(turns, title, date);
-    await run("shortcuts", ["run", name, "-i", png]);
-    return { ok: true, message: `已把长图交给快捷指令「${name}」。` };
   }
 
   return { ok: false, message: "未知操作" };
