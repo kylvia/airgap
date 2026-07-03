@@ -4,6 +4,7 @@ import { registerScan } from "./commands/scan.js";
 import { registerPack } from "./commands/pack.js";
 import { registerOpen } from "./commands/open.js";
 import { registerShow } from "./commands/show.js";
+import { registerShare } from "./commands/share.js";
 import { registerDoctor } from "./commands/doctor.js";
 
 const require = createRequire(import.meta.url);
@@ -20,6 +21,7 @@ registerScan(program);
 registerPack(program);
 registerOpen(program);
 registerShow(program);
+registerShare(program);
 registerDoctor(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {

@@ -3,14 +3,14 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { JsonlRecord, RuleMatch, SessionInfo, Turn } from "../types.js";
-import { streamLines, tryParse } from "../util/jsonl.js";
+import type { Turn } from "../types.js";
 import { discoverSessions } from "../discovery.js";
 import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { renderHtml } from "../render/html.js";
 import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
+import { oneLine, pickSession, readRecords, scanTurns, sessionTitle } from "../session.js";
 
 interface ShowOpts {
   last?: string;
@@ -37,59 +37,6 @@ async function renderPng(html: string, outFile: string): Promise<void> {
 }
 
 // ---------- show 命令 ----------
-
-function oneLine(s: string): string {
-  return s.replace(/\s+/g, " ").trim();
-}
-
-async function readRecords(file: string): Promise<JsonlRecord[]> {
-  const records: JsonlRecord[] = [];
-  for await (const { line, lineNo } of streamLines(file)) {
-    records.push({ raw: line, lineNo, json: tryParse(line) });
-  }
-  return records;
-}
-
-function sessionTitle(records: JsonlRecord[], info: SessionInfo): string {
-  for (let i = records.length - 1; i >= 0; i--) {
-    const j = records[i]?.json;
-    if (j && j["type"] === "ai-title" && typeof j["aiTitle"] === "string" && j["aiTitle"].trim()) {
-      return j["aiTitle"].trim();
-    }
-  }
-  const base = info.cwd ? path.basename(info.cwd) : info.project;
-  return `${base} · 会话片段`;
-}
-
-function pickSession(sessions: SessionInfo[], opts: ShowOpts): SessionInfo | null {
-  if (opts.session) {
-    const prefix = opts.session;
-    const hit = sessions.filter((s) => s.id.startsWith(prefix)).sort((a, b) => b.mtimeMs - a.mtimeMs);
-    return hit[0] ?? null;
-  }
-  const sorted = [...sessions].sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const cwd = process.cwd();
-  return sorted.find((s) => s.cwd === cwd) ?? sorted[0] ?? null;
-}
-
-/** 对选中轮次的所有可见文本跑扫描，同一 (ruleId, secret) 去重 */
-function scanTurns(turns: Turn[], scan: (s: string) => RuleMatch[]): RuleMatch[] {
-  const seen = new Set<string>();
-  const findings: RuleMatch[] = [];
-  const visit = (text: string): void => {
-    for (const m of scan(text)) {
-      const key = `${m.ruleId} ${m.secret}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      findings.push(m);
-    }
-  };
-  for (const turn of turns) {
-    visit(turn.userText);
-    for (const block of turn.assistant) visit(block.text);
-  }
-  return findings;
-}
 
 export function registerShow(program: Command): void {
   program
