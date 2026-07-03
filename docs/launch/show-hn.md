@@ -10,9 +10,9 @@
 
 Claude Code, Codex and similar CLI tools persist every turn of your conversation to local `.jsonl` transcripts — under `~/.claude/projects/` and `~/.codex/sessions/`. That's what makes `--resume` work. It also means that any secret that ever appeared in a session — one you pasted, or one the model read for you when you said "cat the .env" — is now sitting in plaintext on disk, and stays there for weeks by default.
 
-I got curious and scanned my own machine. 1208 sessions (195 Claude + 1013 Codex), ~2GB, 48s to scan. 680 of them contained at least one plaintext secret hit. After dedup that's 11,851 findings.
+I got curious and scanned my own machine. 1216 sessions (202 Claude + 1014 Codex), ~2GB, 48s to scan. 680 of them contained at least one plaintext secret hit. After dedup that's 12,165 findings.
 
-I want to be careful with that number: most of it is lower-confidence stuff (generic `KEY=value` assignments, whole `.env` dumps) that the scanner flags as *suspected* and can't claim is a live key. The part that made me sit up was the high-confidence tier — matched on real key prefixes: 116 Anthropic keys (`sk-ant-`), 126 GitHub tokens, 30 AWS access keys (`AKIA…`), 21 Google API keys, 10 OpenAI keys, 4 raw PEM private keys, plus Slack/Stripe/npm/Telegram. **307 critical-severity hits total, a good chunk of which still look live.** On one solo developer's laptop.
+I want to be careful with that number: most of it is lower-confidence stuff (generic `KEY=value` assignments, whole `.env` dumps) that the scanner flags as *suspected* and can't claim is a live key. The part that made me sit up was the high-confidence tier — matched on real key prefixes: 118 Anthropic keys (`sk-ant-`), 128 GitHub tokens, 30 AWS access keys (`AKIA…`), 22 Google API keys, 16 raw PEM private keys, 10 OpenAI keys. **324 critical-severity hits total, a good chunk of which still look live.** On one solo developer's laptop.
 
 So I wrote `airgap` — a local-only CLI, no cloud, no account, nothing leaves the machine. Three subcommands share one slice-extraction core:
 
