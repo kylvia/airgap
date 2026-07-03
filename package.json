@@ -2,12 +2,28 @@
   "name": "airgap",
   "version": "0.1.0",
   "description": "Scan, redact, and carry your local AI coding sessions. No cloud, no accounts.",
-  "keywords": ["claude-code", "codex", "session", "secrets", "redaction", "handoff"],
+  "keywords": [
+    "claude-code",
+    "codex",
+    "session",
+    "secrets",
+    "redaction",
+    "handoff"
+  ],
   "license": "MIT",
   "type": "module",
-  "bin": { "airgap": "./dist/index.js" },
-  "files": ["dist", "README.md", "README.zh-CN.md", "LICENSE"],
-  "engines": { "node": ">=18" },
+  "bin": {
+    "airgap": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/index.ts",
@@ -15,10 +31,16 @@
     "typecheck": "tsc --noEmit"
   },
   "tsup": {
-    "entry": ["src/index.ts"],
-    "format": ["esm"],
+    "entry": [
+      "src/index.ts"
+    ],
+    "format": [
+      "esm"
+    ],
     "clean": true,
-    "banner": { "js": "#!/usr/bin/env node" }
+    "banner": {
+      "js": "#!/usr/bin/env node"
+    }
   },
   "dependencies": {
     "@clack/prompts": "^0.11.0",

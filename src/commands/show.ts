@@ -1,7 +1,6 @@
 import { Command } from "commander";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { JsonlRecord, RuleMatch, SessionInfo, Turn } from "../types.js";
@@ -11,6 +10,7 @@ import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { renderHtml } from "../render/html.js";
+import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
 
 interface ShowOpts {
   last?: string;
@@ -23,64 +23,16 @@ interface ShowOpts {
   yes?: boolean;
 }
 
-// ---------- PNG（puppeteer-core 可选依赖） ----------
-
-const CHROME_CANDIDATES = [
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-  "/usr/bin/google-chrome",
-  "/usr/bin/google-chrome-stable",
-  "/usr/bin/chromium",
-  "/usr/bin/chromium-browser",
-  "/snap/bin/chromium",
-];
-
-function findChrome(): string | null {
-  const fromEnv = process.env["CHROME_PATH"];
-  if (fromEnv && existsSync(fromEnv)) return fromEnv;
-  for (const candidate of CHROME_CANDIDATES) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return null;
-}
-
-interface MiniPage {
-  setViewport(v: { width: number; height: number; deviceScaleFactor: number }): Promise<void>;
-  setContent(html: string, opts: { waitUntil: string }): Promise<void>;
-  screenshot(opts: { path: string; fullPage: boolean }): Promise<unknown>;
-}
-interface MiniBrowser {
-  newPage(): Promise<MiniPage>;
-  close(): Promise<void>;
-}
-interface MiniPuppeteer {
-  launch(opts: { executablePath: string; headless: boolean }): Promise<MiniBrowser>;
-}
+// ---------- PNG：驱动系统 Chrome，零 npm 依赖 ----------
 
 async function renderPng(html: string, outFile: string): Promise<void> {
-  let puppeteer: MiniPuppeteer;
-  try {
-    // @ts-ignore — puppeteer-core 是可选依赖，未安装时给友好提示
-    const mod = (await import("puppeteer-core")) as { default?: MiniPuppeteer } & MiniPuppeteer;
-    puppeteer = (mod.default ?? mod) as MiniPuppeteer;
-  } catch {
-    throw new Error("PNG 出图需要 puppeteer-core（未安装）。可 `npm i -D puppeteer-core` 后重试，或改用 --html 输出单文件网页。");
+  const chromePath = findChrome();
+  if (!chromePath) {
+    throw new Error(
+      "没找到本机 Chrome/Chromium（PNG 出图需要它来渲染）。可设 CHROME_PATH 指定，或改用 --html 输出单文件网页。",
+    );
   }
-  const executablePath = findChrome();
-  if (!executablePath) {
-    throw new Error("没找到本机 Chrome/Chromium 可执行文件（也可设 CHROME_PATH 环境变量指定）。建议改用 --html 输出单文件网页。");
-  }
-  const browser = await puppeteer.launch({ executablePath, headless: true });
-  try {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 760, height: 1080, deviceScaleFactor: 2 });
-    await page.setContent(html, { waitUntil: "networkidle0" });
-    await page.screenshot({ path: outFile, fullPage: true });
-  } finally {
-    await browser.close();
-  }
+  await renderPngViaChrome(html, outFile, chromePath);
 }
 
 // ---------- show 命令 ----------

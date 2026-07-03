@@ -4,6 +4,25 @@ import { isCodexScaffold } from "../util/codex.js";
 /** tool_use 折叠为一行时 input 摘要的最大长度（字符） */
 const TOOL_SUMMARY_MAX = 80;
 
+/**
+ * 常见工具的"主参数"字段，按优先级取第一个存在的字符串值作为摘要，
+ * 避免把整个 input 对象 JSON.stringify 出来（那样一行全是 {"command":...} 噪声）。
+ */
+const TOOL_PRIMARY_FIELDS = [
+  "command",
+  "file_path",
+  "path",
+  "pattern",
+  "query",
+  "url",
+  "prompt",
+  "description",
+  "subagent_type",
+  "old_string",
+  "content",
+  "name",
+];
+
 function collapseWhitespace(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
@@ -12,18 +31,34 @@ function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
-/** `工具名: input 摘要（≤80 字符）` */
+/** `工具名: 主参数摘要（≤80 字符）` */
 function toolSummary(name: string, input: unknown): string {
-  let brief: string;
+  let brief = "";
   if (typeof input === "string") {
     brief = input;
-  } else if (input === undefined) {
-    brief = "";
-  } else {
-    try {
-      brief = JSON.stringify(input) ?? "";
-    } catch {
-      brief = String(input);
+  } else if (input && typeof input === "object" && !Array.isArray(input)) {
+    const obj = input as Record<string, unknown>;
+    for (const key of TOOL_PRIMARY_FIELDS) {
+      const v = obj[key];
+      if (typeof v === "string" && v.trim()) {
+        brief = v;
+        break;
+      }
+    }
+    if (!brief) {
+      for (const v of Object.values(obj)) {
+        if (typeof v === "string" && v.trim()) {
+          brief = v;
+          break;
+        }
+      }
+    }
+    if (!brief) {
+      try {
+        brief = JSON.stringify(input) ?? "";
+      } catch {
+        brief = String(input);
+      }
     }
   }
   return `${name}: ${truncate(collapseWhitespace(brief), TOOL_SUMMARY_MAX)}`;
