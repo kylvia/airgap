@@ -14,6 +14,7 @@ import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
 
 interface ShowOpts {
   last?: string;
+  turns?: string;
   pick?: boolean;
   session?: string;
   md?: boolean;
@@ -95,6 +96,7 @@ export function registerShow(program: Command): void {
     .command("show")
     .description("Render selected turns of a session to markdown / single-file HTML / long-image PNG (HTML by default)")
     .option("--last <n>", "keep only the last N turns")
+    .option("--turns <list>", "export specific turns by number, comma-separated (e.g. 2,4,8)")
     .option("--pick", "interactively select which turns to export")
     .option("--session <prefix>", "select a session by session id prefix")
     .option("--md", "output markdown")
@@ -136,6 +138,24 @@ export function registerShow(program: Command): void {
         }
         const chosen = new Set(picked as number[]);
         selected = turns.filter((t) => chosen.has(t.index));
+      } else if (opts.turns !== undefined) {
+        const want = new Set(
+          opts.turns
+            .split(",")
+            .map((s) => Number.parseInt(s.trim(), 10))
+            .filter((n) => Number.isInteger(n) && n > 0),
+        );
+        if (want.size === 0) {
+          console.error(pc.red(`--turns 需要逗号分隔的正整数轮次编号，如 --turns 2,4,8；收到：${opts.turns}`));
+          process.exitCode = 1;
+          return;
+        }
+        selected = turns.filter((t) => want.has(t.index));
+        if (selected.length === 0) {
+          console.error(pc.red(`没有匹配到任何轮次（会话共 ${turns.length} 轮，编号 1–${turns.length}）`));
+          process.exitCode = 1;
+          return;
+        }
       } else if (opts.last !== undefined) {
         const n = Number.parseInt(opts.last, 10);
         if (!Number.isFinite(n) || n <= 0) {
