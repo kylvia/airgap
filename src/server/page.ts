@@ -1,4 +1,5 @@
-import { CHAT_CSS } from "../render/html.js";
+import { CHAT_CSS, airgapMark } from "../render/html.js";
+import { THEME_CSS } from "../render/theme.js";
 
 /**
  * 交互页：左勾选、右实时预览（隔离在 iframe 里，聊天 CSS 不污染 app 外壳）、
@@ -14,42 +15,63 @@ export function renderPage(defaultSession?: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>airgap · 分享会话片段</title>
 <style>
+${THEME_CSS}
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
-    color: #1a1a1a; height: 100vh; display: flex; flex-direction: column; background: #fafafa; }
-  header { padding: 12px 18px; border-bottom: 1px solid #e5e5e5; display: flex; align-items: center; gap: 14px; background: #fff; }
-  header .logo { font-weight: 700; font-size: 15px; }
-  header select { padding: 5px 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; max-width: 340px; }
+  body { font-family: var(--font-sans);
+    color: var(--fg); height: 100vh; display: flex; flex-direction: column; background: var(--bg-subtle); }
+  .mark { display: inline-flex; vertical-align: middle; color: var(--accent); flex-shrink: 0; }
+  header { position: relative; padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; background: var(--bg); overflow: hidden; }
+  header::before {
+    content: ""; position: absolute; top: -70px; left: -20px; width: 260px; height: 180px; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(45% 60% at 30% 50%, rgba(160,181,235,0.30), transparent 70%),
+      radial-gradient(45% 60% at 60% 55%, rgba(167,252,205,0.22), transparent 70%);
+    filter: blur(26px);
+  }
+  header > * { position: relative; z-index: 1; }
+  header .logo { font-family: var(--font-serif); font-weight: 400; font-size: 22px; letter-spacing: -0.02em; display: inline-flex; align-items: center; gap: 9px; }
+  header select { height: 34px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md);
+    background: var(--bg); color: var(--fg); font-family: var(--font-mono); font-size: 13px; max-width: 340px; transition: border-color .15s; }
+  header select:hover { border-color: var(--border-strong); }
+  header select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   main { flex: 1; display: flex; min-height: 0; }
-  .left { width: 380px; border-right: 1px solid #e5e5e5; display: flex; flex-direction: column; background: #fff; }
-  .left .bar { padding: 8px 14px; border-bottom: 1px solid #eee; font-size: 12.5px; color: #666; display: flex; gap: 12px; align-items: center; }
-  .left .bar a { color: #576b95; cursor: pointer; text-decoration: none; }
+  .left { width: 380px; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg); }
+  .left .bar { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--fg-muted); display: flex; gap: 14px; align-items: center; }
+  .left .bar a { color: var(--accent); cursor: pointer; text-decoration: none; transition: opacity .12s; }
+  .left .bar a:hover { opacity: 0.7; }
   .list { flex: 1; overflow-y: auto; padding: 6px 0; }
-  .row { display: flex; gap: 8px; padding: 8px 14px; align-items: flex-start; cursor: pointer; border-bottom: 1px solid #f4f4f4; }
-  .row:hover { background: #f7f7f7; }
-  .row input { margin-top: 3px; }
+  .list:empty::after {
+    content: "从上方选择会话，勾选要分享的轮次开始";
+    display: block; padding: 48px 28px; text-align: center; color: var(--fg-subtle);
+    font-size: 13px; line-height: 1.7;
+  }
+  .row { display: flex; gap: 8px; padding: 10px 16px; align-items: flex-start; cursor: pointer; border-bottom: 1px solid var(--border-subtle); transition: background .12s; }
+  .row:hover { background: var(--bg-hover); }
+  .row input { margin-top: 3px; accent-color: var(--accent); }
   .row .body { flex: 1; min-width: 0; }
   .row .top { font-size: 13px; }
-  .row .idx { color: #999; margin-right: 6px; }
-  .row .prev { color: #333; }
-  .row .tag { font-size: 11px; color: #b06a00; background: #fff3e0; border-radius: 3px; padding: 0 5px; margin-left: 6px; }
-  .row .warn { font-size: 11px; color: #c0392b; margin-left: 6px; }
-  .right { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #ededed; }
-  .right iframe { flex: 1; border: 0; width: 100%; background: #ededed; }
-  footer { border-top: 1px solid #e5e5e5; background: #fff; padding: 10px 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  footer button { padding: 7px 14px; border: 1px solid #ddd; border-radius: 7px; background: #fff; font-size: 13px; cursor: pointer; }
-  footer button.primary { background: #07c160; border-color: #07c160; color: #fff; font-weight: 600; }
-  footer button:hover { border-color: #999; }
-  footer button.primary:hover { background: #06ad56; }
-  footer .status { flex: 1; font-size: 13px; color: #444; min-width: 200px; }
-  footer .status.err { color: #c0392b; }
-  .sbanner { background: #fff3e0; color: #b06a00; font-size: 12.5px; padding: 6px 16px; border-bottom: 1px solid #ffe0b2; display: none; }
+  .row .idx { color: var(--fg-subtle); margin-right: 6px; }
+  .row .prev { color: var(--fg); }
+  .row .tag { font-size: 11px; color: var(--warning-fg); background: var(--warning-bg); border-radius: var(--radius-pill); padding: 1px 9px; margin-left: 6px; }
+  .row .warn { font-size: 11px; color: var(--danger); margin-left: 6px; }
+  .right { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg-subtle); }
+  .right iframe { flex: 1; border: 0; width: 100%; background: var(--bg-subtle); }
+  footer { border-top: 1px solid var(--border); background: var(--bg); padding: 12px 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  footer button { height: 36px; padding: 0 20px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
+    background: transparent; color: var(--fg); font-family: var(--font-mono); font-size: 13px; cursor: pointer; transition: background .15s, border-color .15s; }
+  footer button:hover { background: var(--bg-hover); border-color: var(--fg); }
+  footer button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  footer button.primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-bg); color: var(--btn-primary-fg); font-weight: 500; }
+  footer button.primary:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); }
+  footer .status { flex: 1; font-size: 13px; color: var(--fg-muted); min-width: 200px; }
+  footer .status.err { color: var(--danger); }
+  .sbanner { background: var(--warning-bg); color: var(--warning-fg); font-size: 12.5px; padding: 8px 18px; border-bottom: 1px solid var(--warning); display: none; }
 </style>
 </head>
 <body>
   <header>
-    <span class="logo">airgap</span>
-    <span style="font-size:13px;color:#888">分享会话片段</span>
+    <span class="logo">${airgapMark(20)}<span>airgap</span></span>
+    <span style="font-size:13px;color:var(--fg-muted)">分享会话片段</span>
     <select id="sess"></select>
   </header>
   <div class="sbanner" id="sbanner"></div>
@@ -74,6 +96,8 @@ export function renderPage(defaultSession?: string): string {
 <script>
 const CHAT_CSS = ${chatCss};
 const DEFAULT = ${def};
+const MARK_H = ${JSON.stringify(airgapMark(24))};   // 预览外壳 header/footer 的品牌 mark（与 renderHtml 一致）
+const MARK_F = ${JSON.stringify(airgapMark(13))};
 let detail = null;            // 当前会话 {id,title,date,turns:[]}
 const selected = new Set();   // 选中的轮次 index
 let pvReady = false;          // 预览 iframe 是否已加载好
@@ -145,8 +169,8 @@ function buildPreviewShell() {
     .map((t) => '<div id="pv-turn-' + t.index + '" style="display:none">' + t.html + '</div>')
     .join("\\n");
   const doc = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' + CHAT_CSS + '</style></head><body><div class="wrap">'
-    + '<div class="header"><div class="title">' + esc(detail.title) + '</div><div id="pv-sub">' + esc(detail.date) + ' · 共 0 轮</div></div>'
-    + blocks + '<div class="footer">导出自本地会话 · Generated by airgap</div></div></body></html>';
+    + '<div class="header"><div class="title">' + MARK_H + '<span>' + esc(detail.title) + '</span></div><div id="pv-sub">' + esc(detail.date) + ' · 共 0 轮</div></div>'
+    + blocks + '<div class="footer">' + MARK_F + '<span>导出自本地会话 · Generated by airgap</span></div></div></body></html>';
   const iframe = $("preview");
   pvReady = false;
   iframe.onload = () => { pvReady = true; syncPreview(null); };

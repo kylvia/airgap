@@ -140,8 +140,16 @@ export interface PackManifest {
 
 export interface TurnBlock {
   kind: "text" | "thinking" | "tool";
-  /** for tool blocks: one-line summary "ToolName: brief" */
+  /** text/thinking body; for tool blocks: one-line summary "ToolName: brief" (fallback + markdown) */
   text: string;
+  /** tool blocks only: tool name, e.g. "Bash" / "Edit" */
+  toolName?: string;
+  /** tool blocks only: full structured input (command / file path / params), may be multi-line, capped */
+  toolInput?: string;
+  /** tool blocks only: execution result summary (first lines, truncated) */
+  toolResult?: string;
+  /** tool blocks only: the result was an error */
+  toolError?: boolean;
 }
 
 export interface Turn {

@@ -1,8 +1,13 @@
-import type { JsonlRecord, SessionSource, Turn } from "../types.js";
+import type { JsonlRecord, SessionSource, Turn, TurnBlock } from "../types.js";
 import { isCodexScaffold } from "../util/codex.js";
 
 /** tool_use 折叠为一行时 input 摘要的最大长度（字符） */
 const TOOL_SUMMARY_MAX = 80;
+/** toolcard 输入区：展开的结构化 input 上限（字符） */
+const TOOL_INPUT_MAX = 600;
+/** toolcard 结果区：保留前几行、整体字符上限 */
+const TOOL_RESULT_LINES = 6;
+const TOOL_RESULT_MAX = 400;
 
 /**
  * 常见工具的"主参数"字段，按优先级取第一个存在的字符串值作为摘要，
@@ -64,6 +69,82 @@ function toolSummary(name: string, input: unknown): string {
   return `${name}: ${truncate(collapseWhitespace(brief), TOOL_SUMMARY_MAX)}`;
 }
 
+/**
+ * tool_use 的 input 展开成结构化文本（给 toolcard 输入区，比一行摘要更完整）：
+ * 字符串直接给；单参数对象只给值（不套 key 前缀）；多参数逐行 `key: value`；整体截断。
+ */
+function structuredInput(input: unknown): string | undefined {
+  if (typeof input === "string") {
+    const s = input.trim();
+    return s.length > 0 ? truncate(s, TOOL_INPUT_MAX) : undefined;
+  }
+  const obj = asRecord(input);
+  if (!obj) return undefined;
+  const entries = Object.entries(obj).filter(([, v]) => v != null && v !== "");
+  const single = entries.length === 1;
+  const lines: string[] = [];
+  for (const [k, v] of entries) {
+    let val: string;
+    if (typeof v === "string") val = v;
+    else {
+      try {
+        val = JSON.stringify(v) ?? "";
+      } catch {
+        val = String(v);
+      }
+    }
+    val = val.trim();
+    if (!val) continue;
+    lines.push(single ? val : `${k}: ${val}`);
+  }
+  return lines.length > 0 ? truncate(lines.join("\n"), TOOL_INPUT_MAX) : undefined;
+}
+
+/** 工具结果摘要（给 toolcard 结果区）：丢空行、保留前几行、整体截断；空结果返回 undefined。 */
+function summarizeResult(text: string): string | undefined {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return undefined;
+  const head = lines.slice(0, TOOL_RESULT_LINES).join("\n");
+  const clipped = lines.length > TOOL_RESULT_LINES ? `${head}\n…` : head;
+  return truncate(clipped, TOOL_RESULT_MAX);
+}
+
+/** tool_result.content：string 或 `[{type:"text",text}]` 块数组 → 文本。 */
+function toolResultContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    const b = asRecord(block);
+    if (b && b["type"] === "text" && typeof b["text"] === "string") parts.push(b["text"]);
+  }
+  return parts.join("\n");
+}
+
+/** 顶层 toolUseResult（结构化原始结果）→ 文本，优先 stdout/stderr/output。 */
+function structuredResultText(v: unknown): string {
+  if (typeof v === "string") return v;
+  const obj = asRecord(v);
+  if (!obj) return "";
+  const parts: string[] = [];
+  for (const key of ["stdout", "stderr", "output", "text", "result"]) {
+    const val = obj[key];
+    if (typeof val === "string" && val.trim()) parts.push(val);
+  }
+  return parts.join("\n");
+}
+
+/** 从 tool_result 块 + 顶层 toolUseResult 抽取结果文本和错误标记。块内容优先，空则退回结构化结果。 */
+function claudeResultText(
+  b: Record<string, unknown>,
+  toolUseResult: unknown,
+): { text: string; isError: boolean } {
+  const isError = b["is_error"] === true;
+  let text = toolResultContentText(b["content"]);
+  if (!text.trim()) text = structuredResultText(toolUseResult);
+  return { text, isError };
+}
+
 function asRecord(v: unknown): Record<string, unknown> | null {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
@@ -123,7 +204,11 @@ function claudeUserText(content: unknown): string | null {
   return joined.length > 0 ? joined : null;
 }
 
-function pushClaudeAssistantBlocks(turn: Turn, message: Record<string, unknown>): void {
+function pushClaudeAssistantBlocks(
+  turn: Turn,
+  message: Record<string, unknown>,
+  toolIndex: Map<string, TurnBlock>,
+): void {
   const content = message["content"];
   if (typeof content === "string") {
     const trimmed = content.trim();
@@ -143,15 +228,44 @@ function pushClaudeAssistantBlocks(turn: Turn, message: Record<string, unknown>)
       if (typeof thinking === "string" && thinking.trim()) turn.assistant.push({ kind: "thinking", text: thinking });
     } else if (t === "tool_use") {
       const name = typeof b["name"] === "string" ? b["name"] : "tool";
-      turn.assistant.push({ kind: "tool", text: toolSummary(name, b["input"]) });
+      const tb: TurnBlock = {
+        kind: "tool",
+        text: toolSummary(name, b["input"]),
+        toolName: name,
+        toolInput: structuredInput(b["input"]),
+      };
+      turn.assistant.push(tb);
+      const id = b["id"];
+      if (typeof id === "string") toolIndex.set(id, tb);
     }
     // 其他块类型（fallback 等）跳过
+  }
+}
+
+/** tool_result 承载记录：把结果摘要填回之前对应的 tool_use 卡。返回是否处理了（用于判定不开新 turn）。 */
+function absorbClaudeToolResult(j: Record<string, unknown>, toolIndex: Map<string, TurnBlock>): void {
+  const message = asRecord(j["message"]);
+  if (!message) return;
+  const content = message["content"];
+  if (!Array.isArray(content)) return;
+  for (const block of content) {
+    const b = asRecord(block);
+    if (!b || b["type"] !== "tool_result") continue;
+    const id = b["tool_use_id"];
+    if (typeof id !== "string") continue;
+    const tb = toolIndex.get(id);
+    if (!tb) continue;
+    const { text, isError } = claudeResultText(b, j["toolUseResult"]);
+    const summary = summarizeResult(text);
+    if (summary) tb.toolResult = summary;
+    if (isError) tb.toolError = true;
   }
 }
 
 function extractClaudeTurns(records: JsonlRecord[]): Turn[] {
   const turns: Turn[] = [];
   let current: Turn | null = null;
+  const toolIndex = new Map<string, TurnBlock>(); // tool_use_id -> 卡片，供 tool_result 回填
   for (const rec of records) {
     const j = rec.json;
     if (!j) continue;
@@ -162,15 +276,16 @@ function extractClaudeTurns(records: JsonlRecord[]): Turn[] {
       if (j["isCompactSummary"] === true) continue; // 压缩摘要是簿记，不是用户发言
       const message = asRecord(j["message"]);
       if (!message) continue;
+      absorbClaudeToolResult(j, toolIndex); // 先把工具结果回填到对应卡片
       const userText = claudeUserText(message["content"]);
-      if (userText === null) continue;
+      if (userText === null) continue; // tool_result 承载 / 空内容：不开新 turn
       current = { index: turns.length + 1, userText, assistant: [], timestamp: recordTimestamp(j) };
       turns.push(current);
     } else if (type === "assistant") {
       if (!current) continue;
       const message = asRecord(j["message"]);
       if (!message) continue;
-      pushClaudeAssistantBlocks(current, message);
+      pushClaudeAssistantBlocks(current, message, toolIndex);
     }
     // attachment / mode / system / progress / summary 等类型直接跳过
   }
@@ -212,6 +327,7 @@ function codexReasoningText(payload: Record<string, unknown>): string {
 function extractCodexTurns(records: JsonlRecord[]): Turn[] {
   const turns: Turn[] = [];
   let current: Turn | null = null;
+  const toolIndex = new Map<string, TurnBlock>(); // call_id -> 卡片，供 *_output 回填
   for (const rec of records) {
     const j = rec.json;
     if (!j) continue;
@@ -238,7 +354,37 @@ function extractCodexTurns(records: JsonlRecord[]): Turn[] {
       if (!current) continue;
       const name = typeof payload["name"] === "string" ? payload["name"] : "tool";
       const input = pt === "function_call" ? payload["arguments"] : payload["input"];
-      current.assistant.push({ kind: "tool", text: toolSummary(name, input) });
+      const tb: TurnBlock = {
+        kind: "tool",
+        text: toolSummary(name, input),
+        toolName: name,
+        toolInput: structuredInput(input),
+      };
+      current.assistant.push(tb);
+      const callId = payload["call_id"];
+      if (typeof callId === "string") toolIndex.set(callId, tb);
+    } else if (pt === "function_call_output" || pt === "custom_tool_call_output") {
+      const callId = payload["call_id"];
+      if (typeof callId !== "string") continue;
+      const tb = toolIndex.get(callId);
+      if (!tb) continue;
+      const out = payload["output"];
+      let text = "";
+      if (typeof out === "string") {
+        text = out;
+      } else {
+        const or = asRecord(out);
+        if (or && typeof or["output"] === "string") text = or["output"];
+        else {
+          try {
+            text = JSON.stringify(out) ?? "";
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      const summary = summarizeResult(text);
+      if (summary) tb.toolResult = summary;
     } else if (pt === "web_search_call") {
       if (!current) continue;
       const action = asRecord(payload["action"]);
@@ -248,7 +394,12 @@ function extractCodexTurns(records: JsonlRecord[]): Turn[] {
           : action && typeof action["url"] === "string"
             ? action["url"]
             : "";
-      current.assistant.push({ kind: "tool", text: toolSummary("web_search", brief) });
+      current.assistant.push({
+        kind: "tool",
+        text: toolSummary("web_search", brief),
+        toolName: "web_search",
+        toolInput: structuredInput(brief),
+      });
     }
     // function_call_output / custom_tool_call_output 等跳过
   }
