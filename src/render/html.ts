@@ -162,7 +162,7 @@ export const CHAT_CSS = `${THEME_CSS}
   .msg-ai code {
     font-family: var(--font-mono); font-size: 13px;
     background: var(--bg-hover); border: 1px solid var(--border);
-    border-radius: 6px; padding: 1px 5px; color: var(--fg);
+    border-radius: var(--radius-sm); padding: 1px 5px; color: var(--fg);
   }
   .msg-ai pre {
     background: var(--bg-hover); color: var(--fg); border: 1px solid var(--border);
@@ -170,8 +170,11 @@ export const CHAT_CSS = `${THEME_CSS}
     font-family: var(--font-mono); font-size: 13px; line-height: 1.7;
   }
   .msg-ai pre code { background: none; border: none; color: inherit; padding: 0; }
-  .msg-ai a { color: var(--accent); text-decoration: none; }
+  .msg-ai a { color: var(--accent); text-decoration: none; transition: color var(--dur-1) var(--ease); }
   .msg-ai a:hover { text-decoration: underline; }
+  .msg-ai a:focus-visible, .msg-ai details.thinking summary:focus-visible {
+    outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm);
+  }
   .msg-ai .toolcard {
     border: 1px solid var(--border); border-radius: var(--radius-md);
     background: var(--bg-subtle); margin: 0 0 10px; overflow: hidden;
