@@ -1,30 +1,31 @@
 ---
-version: 3
+version: 4
 name: airgap
 theme: light
-style: Monad — editorial tech journal on warm parchment（务实偏离版）
-description: airgap 面向人的 HTML 产出的视觉规范，Monad 风格（温暖羊皮纸 + editorial serif 标题 + 比例正文 + mono 技术元素）。这是浅色主题；深色主题用相同的 token 名、不同的值，见 design.dark.md。token 的代码实现在 src/render/theme.ts（唯一权威源，改值必改那里并同步本文档）。设计参考底稿见 demo.md。**务实偏离**：忠于 Monad 的羊皮纸/serif/胶囊/Ash 边框语言，但为可读性与成品感做三处偏离——正文改比例字体、卡片加极轻阴影 + 微色差、加克制的装饰渐变与品牌 mark。
+style: Monad — editorial tech journal on warm parchment（务实偏离版，吸收 Geist 工程纪律）
+description: airgap 面向人的 HTML 产出的视觉规范，Monad 风格（温暖羊皮纸 + editorial serif 标题 + 比例正文 + mono 技术元素）。这是浅色主题；深色主题用相同的 token 名、不同的值，见 design.dark.md。token 的代码实现在 src/render/theme.ts（唯一权威源，改值必改那里并同步本文档）。设计参考底稿见 demo.md。**务实偏离**：忠于 Monad 的羊皮纸/serif/胶囊/Ash 边框语言，但为可读性与成品感做三处偏离——正文改比例字体、卡片加极轻阴影 + 微色差、加克制的装饰渐变与品牌 mark。**Geist 纪律**（v4 吸收，见「Geist discipline」段）：中性色收敛成单一意图编码灰梯、动效/焦点 token 化、状态双编码（颜色 + 字形）、灰色排信息优先级而 accent 只留关键操作。
 ---
 
 ```yaml
 colors:
-  # 背景 / 表面（暖羊皮纸，never pure white；卡片比页面略亮以浮起）
-  bg: "#f6f3f1"              # parchment：AI 卡片底（比页面底略亮）
-  bg-subtle: "#efeae6"       # 页面底 + PNG 长图底色（比卡片略深一档，制造微色差；必须不透明）
-  bg-hover: "#e7e1dc"        # 行 hover / 代码面 / 工具面板底
-  bg-active: "#ddd6d0"       # 按下
+  # ── 中性灰梯（Geist 意图编码，唯一中性色来源；浅色值，深色见 design.dark.md）──
+  # 100–300 面 / 400–500 边框 / 600–800 文字。100→800：浅色由亮到暗、深色由暗到亮，两向皆单调。
+  # 语义 token（bg/border/fg…）在 theme.ts 里一律 `var(--gray-N)` 别名，改中性色只动灰梯。
+  gray-100: "#f6f3f1"        # → --bg：parchment，AI 卡片底
+  gray-200: "#e7e1dc"        # → --bg-hover：行 hover / 代码面 / 工具卡头
+  gray-300: "#ddd6d0"        # → --bg-active：按下
+  gray-400: "#cecac8"        # → --border：ash，默认边框 / 分隔线
+  gray-500: "#b3ada8"        # → --border-strong：次按钮 / hover 强边框
+  gray-600: "#797776"        # → --fg-subtle：helper / turn-label / footer / thinking / 工具参数
+  gray-700: "#4e4d4d"        # → --fg-muted：次要文字
+  gray-800: "#242424"        # → --fg：off-black，主文字 / 标题
+  # ── 脱离灰梯的特殊面（不参与单调 ramp，单独定义）──
+  bg-subtle: "#efeae6"       # 页面底 + PNG 长图底色（比 bg 略深，卡片浮其上；必须不透明）
   bg-muted: "#cfdaf5"        # periwinkle mist：撞色面，专给用户气泡
-  # 前景（文字由强到弱）
-  fg: "#242424"              # off-black：主文字 / 标题
-  fg-muted: "#4e4d4d"        # graphite：次要文字
-  fg-subtle: "#797776"       # smoke：helper / turn-label / footer / thinking / 工具参数
-  # 边框（1px Ash，主要分层手段）
-  border: "#cecac8"          # ash：默认边框 / 分隔线
-  border-strong: "#b3ada8"   # 次按钮 / hover 强边框
   border-subtle: "rgba(36,36,36,0.08)"   # 列表行细分隔
-  # 功能色
-  accent: "#2b59d1"          # lake blue：唯一饱和强调，只给链接 / focus / 主按钮 / 品牌 mark / 工具面板竖条
-  danger: "#c0392b"          # 密钥告警红（airgap 功能扩展；demo.md 无功能红，暖调协调）
+  # ── 功能色（accent 是唯一饱和强调；danger/warning 只给告警）──
+  accent: "#2b59d1"          # lake blue：只给链接 / focus / 主按钮 / 品牌 mark —— 每屏克制
+  danger: "#c0392b"          # 密钥告警红 + 工具卡报错描边（demo.md 无功能红，暖调协调）
   warning: "#d4a72c"         # gold：amber 语义边框
   warning-fg: "#7a5c12"      # amber 文字（浅底可读）
   warning-bg: "rgba(212,167,44,0.16)"
@@ -44,7 +45,7 @@ typography:
   heading: { font: "{typography.font-serif}", fontSize: 18-24px, fontWeight: 400, letterSpacing: -0.02em, lineHeight: 1.2 }  # h2 24 / h3 20 / h4 18
   copy:    { font: "{typography.font-sans}", fontSize: 15px, lineHeight: 1.65 }   # 正文（改比例字体提可读）
   bubble:  { font: "{typography.font-sans}", fontSize: 14.5px }                   # 用户气泡
-  tool:    { font: "{typography.font-mono}", fontSize: 12px }                     # 工具面板 / 行内码 / pre
+  tool:    { font: "{typography.font-mono}", fontSize: 12px }                     # 工具卡输入 / 行内码 / pre
   label:   { font: "{typography.font-mono}", fontSize: 13px }                     # 按钮 / select
   caption: { font: "{typography.font-mono}", fontSize: 11.5-12px, letterSpacing: 0.04em }  # turn-label / footer
 
@@ -52,15 +53,21 @@ spacing:      # 8px 基准
   base: 8px
   values: [8, 16, 24, 32, 40, 56]
 
-rounded:
-  md: 12px      # 代码块 / select / 工具面板
+rounded:      # 每类组件一档圆角，never 尖角
+  sm: 6px       # 行内码 / 小徽标 / focus 圆角
+  md: 12px      # 代码块 / select / 工具卡
   card: 20px    # AI 卡片 / 气泡（≥16px）
   pill: 100px   # 按钮 / tag
+
+motion:       # Geist：动效只表达状态变化，统一缓动；别给静态元素乱加过渡
+  ease: "cubic-bezier(0.4, 0, 0.2, 1)"
+  dur-1: 120ms  # hover / opacity 微交互
+  dur-2: 200ms  # 状态切换
 
 elevation:
   # 务实偏离 demo.md 的 no-shadow 铁律：极轻阴影 + 微色差让卡片浮起
   shadow-card: "0 1px 2px rgba(0,0,0,0.05), 0 1px 1px rgba(0,0,0,0.03)"   # 深色 0 1px 2px rgba(0,0,0,0.35)
-  focus-ring: "0 0 0 2px #f6f3f1, 0 0 0 4px #2b59d1"
+  focus-ring: "0 0 0 2px var(--bg), 0 0 0 4px var(--accent)"   # 内圈 bg 打底、外圈 accent；深浅通用一次定义，:focus-visible 才出
 
 components:
   brand-mark:                      # airgap 品牌 mark，inline SVG（零外链）
@@ -140,13 +147,14 @@ airgap 有两处面向人的 HTML 产出，都遵循本规范：
 
 ## Colors
 
-- **背景**：`bg`（卡片，`#f6f3f1`）比 `bg-subtle`（页面底，`#efeae6`）略亮一档 —— 卡片靠这道微色差 + 极轻阴影浮起。`bg-hover` 给行 hover / 代码面 / 工具面板；`bg-muted`（periwinkle）是唯一撞色 UI 面，只给用户气泡。
+- **中性灰梯**：所有中性色（面 / 边框 / 文字）收敛成单一意图编码梯 `--gray-100..800`（100–300 面、400–500 边框、600–800 文字），语义 token 一律 `var(--gray-N)` 别名。改中性色只动灰梯一处。
+- **背景**：`bg`（卡片，`gray-100`）比 `bg-subtle`（页面底，`#efeae6`）略亮一档 —— 卡片靠这道微色差 + 极轻阴影浮起。`bg-subtle` 脱离灰梯单独定义：它在浅色比 `bg` 略深、在深色是全场最暗（页面沉在卡片之下），无法与灰梯同时单调，所以不进 ramp。`bg-hover`（`gray-200`）给行 hover / 代码面 / 工具卡头；`bg-muted`（periwinkle）是唯一撞色 UI 面，只给用户气泡。
 - **前景** `fg` / `fg-muted` / `fg-subtle` 由强到弱。
-- **强调**只有一个 `accent`（Lake Blue），给链接 / focus / 主按钮 / 品牌 mark / 工具面板竖条 —— 每屏克制使用。`danger` / `warning` 是告警专用。装饰 pastel（sky/mint/coral）**只入 header 渐变晕，绝不进功能 UI**。
+- **强调**只有一个 `accent`（Lake Blue），给链接 / focus / 主按钮 / 品牌 mark —— **灰色排信息优先级，accent 只留关键操作**（Geist 纪律）。`danger`（含工具卡报错描边）/ `warning` 是告警专用。装饰 pastel（sky/mint/coral）**只入 header 渐变晕，绝不进功能 UI**。
 
 ## Typography
 
-不引 webfont（导出 HTML 零外链）。**三级分工**：serif 只给标题、sans 给正文和 UI 文字、mono 给技术元素（代码、工具面板、tag、select、按钮、caption）。serif/mono 的对比仍在，只是正文让位给可读性。**工具卡去 emoji** —— emoji 彩色破坏单色调、是原型感来源。
+不引 webfont（导出 HTML 零外链）。**三级分工**：serif 只给标题、sans 给正文和 UI 文字、mono 给技术元素（代码、工具卡、tag、select、按钮、caption）。serif/mono 的对比仍在，只是正文让位给可读性。**工具卡去 emoji** —— emoji 彩色破坏单色调、是原型感来源。字重克制：serif 标题恒 400、正文 400、`strong`/工具名 600、按钮 500 —— 语义分工，别再引第四档。
 
 ## Layout
 
@@ -154,11 +162,25 @@ airgap 有两处面向人的 HTML 产出，都遵循本规范：
 
 ## Elevation & Depth
 
-**极轻阴影 + 微色差**（务实偏离 demo 的 no-shadow）：`shadow-card` 浅色 `0 1px 2px rgba(0,0,0,0.05)`、深色 `0 1px 2px rgba(0,0,0,0.35)`，配 `bg`/`bg-subtle` 色差让 `.msg-ai` 卡片有边界。仍不用重投影。聚焦一律 `focus-ring`（`:focus-visible`）。
+**极轻阴影 + 微色差**（务实偏离 demo 的 no-shadow）：`shadow-card` 浅色 `0 1px 2px rgba(0,0,0,0.05)`、深色 `0 1px 2px rgba(0,0,0,0.35)`，配 `bg`/`bg-subtle` 色差让 `.msg-ai` 卡片有边界。仍不用重投影。
+
+## Motion & Focus
+
+- **动效只表达变化**（Geist）：过渡走 `--dur-1`（120ms，hover/opacity）/ `--dur-2`（200ms，状态切换）+ `--ease`，别给静态元素乱加过渡、别超 300ms、代码里不裸写 `.15s`。
+- **焦点永远可见**：一切可键盘聚焦元素（select / button / 链接 / `summary` / bar 链接）在 `:focus-visible` 出 `--focus-ring`（内圈 `bg` 打底、外圈 `accent`，深浅通用），`outline:none` 后必须补 ring。
+
+## Geist discipline（v4 吸收，务必守）
+
+从 Vercel Geist 嫁接进来的四条工程纪律，都不改 Monad 长相、只提工程严谨度：
+
+1. **中性色单一灰梯**：`--gray-100..800` 意图编码（100–300 面 / 400–500 边框 / 600–800 文字），语义 token 全别名引梯；`bg-subtle`/`bg-muted` 是脱离梯的特殊面。改中性色只动灰梯一处。
+2. **灰色排优先级、accent 只留关键**：信息层级靠灰梯深浅拉开，`accent` 每屏克制，只给链接 / focus / 主按钮 / mark。
+3. **状态双编码**：成功 / 失败 / 告警绝不只靠颜色 —— 工具卡状态用 `✓/✗` 字形 + 色，告警横幅 / 行用 `⚠` + 色，错误状态带文字标签（色盲 + 单色 PNG 截图下仍可读）。
+4. **一档圆角、克制字重**：每类组件固定一档 `--radius-*`（never 裸写 px），字重只用 400/500/600 语义三档。
 
 ## Shapes
 
-`md 12px`（代码 / select / 工具面板）、`card 20px`（卡片 / 气泡）、`pill 100px`（按钮 / tag）。never 尖角。
+`sm 6px`（行内码 / focus 圆角）、`md 12px`（代码 / select / 工具卡）、`card 20px`（卡片 / 气泡）、`pill 100px`（按钮 / tag）。每类组件固定一档，never 尖角、never 裸写 `px`（走 `--radius-*`）。
 
 ## Components
 
@@ -182,6 +204,12 @@ airgap 有两处面向人的 HTML 产出，都遵循本规范：
 - **Do** Lake Blue 只留主操作/强调。**Don't** 引入第四种 UI 强调色；pastel 只进 header 渐变。
 - **Do** 卡片极轻阴影 + 微色差、按钮胶囊。**Don't** 用重投影或尖角。
 - **Do** 每个工具调用成一张带输入/结果的执行卡、状态用 ✓/✗ 字形 + 颜色双编码。**Don't** 让工具调用回到一行一个裸 emoji 灰行（那就是"原型感"根因），或只靠颜色区分成功/失败。
+
+## Agent Prompt Guide（快速喂 agent）
+
+要 AI agent 产出 airgap 风格 UI 时，把下面这段作为约束贴给它：
+
+> 暖羊皮纸底（`#f6f3f1` 卡片 / `#efeae6` 页面，**永不纯白**）；深色跟随系统、用暖深纸（`#211e1b`）非纯黑。标题用 serif 且**永远 weight 400**（never bold），正文 / UI 用 sans，代码 / 工具 / 标签 / 按钮用 mono。唯一强调色 Lake Blue `#2b59d1`，只给链接 / 焦点 / 主按钮 / 品牌 mark；**灰色排信息优先级**。中性色一律取自灰梯 `--gray-100..800`，别裸写 hex。圆角只用 6 / 12 / 20 / 100px 四档、never 尖角；按钮走 100px 胶囊；无重投影，靠 1px 边框 + 极轻阴影分层。**状态双编码**（颜色 + `✓/✗/⚠` 字形）；工具调用渲染成卡片（名 + 状态 + 输入 + 结果摘要），去 emoji。动效只表达变化（≤200ms、统一缓动）；焦点永远出 `:focus-visible` ring。
 
 ## Implementation constraints（airgap 特有，改前必看）
 
