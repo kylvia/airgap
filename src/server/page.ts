@@ -18,27 +18,21 @@ export function renderPage(defaultSession?: string): string {
 ${THEME_CSS}
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: var(--font-sans);
-    color: var(--fg); height: 100vh; display: flex; flex-direction: column; background: var(--bg-subtle); }
-  .mark { display: inline-flex; vertical-align: middle; color: var(--accent); flex-shrink: 0; }
-  header { position: relative; padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; background: var(--bg); overflow: hidden; }
-  header::before {
-    content: ""; position: absolute; top: -70px; left: -20px; width: 260px; height: 180px; z-index: 0; pointer-events: none;
-    background:
-      radial-gradient(45% 60% at 30% 50%, rgba(160,181,235,0.30), transparent 70%),
-      radial-gradient(45% 60% at 60% 55%, rgba(167,252,205,0.22), transparent 70%);
-    filter: blur(26px);
-  }
-  header > * { position: relative; z-index: 1; }
-  header .logo { font-family: var(--font-serif); font-weight: 400; font-size: 22px; letter-spacing: -0.02em; display: inline-flex; align-items: center; gap: 9px; }
-  header select { height: 34px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-md);
-    background: var(--bg); color: var(--fg); font-family: var(--font-mono); font-size: 13px; max-width: 340px; transition: border-color var(--dur-1) var(--ease); }
+    color: var(--fg); height: 100vh; display: flex; flex-direction: column;
+    background: var(--bg-subtle); }
+  .mark { display: inline-flex; vertical-align: middle; color: var(--fg); flex-shrink: 0; }
+  header { position: sticky; top: 0; z-index: 10; padding: 14px 20px; display: flex; align-items: center; gap: 14px;
+    background: var(--bg-subtle); border-bottom: 1px solid var(--border); }
+  header .logo { font-family: var(--font-serif); font-weight: 600; font-size: 24px; letter-spacing: 0; display: inline-flex; align-items: center; gap: 9px; }
+  header select { height: 34px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-input);
+    background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: 13px; max-width: 340px; transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
   header select:hover { border-color: var(--border-strong); }
   header select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   main { flex: 1; display: flex; min-height: 0; }
   .left { width: 380px; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg); }
   .left .bar { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--fg-muted); display: flex; gap: 14px; align-items: center; }
-  .left .bar a { color: var(--accent); cursor: pointer; text-decoration: none; transition: opacity var(--dur-1) var(--ease); border-radius: var(--radius-sm); }
-  .left .bar a:hover { opacity: 0.7; }
+  .left .bar a { color: var(--fg); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; transition: opacity var(--dur-1) var(--ease); border-radius: var(--radius-input); }
+  .left .bar a:hover { opacity: 0.68; }
   .left .bar a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .list { flex: 1; overflow-y: auto; padding: 6px 0; }
   .list:empty::after {
@@ -48,21 +42,22 @@ ${THEME_CSS}
   }
   .row { display: flex; gap: 8px; padding: 10px 16px; align-items: flex-start; cursor: pointer; border-bottom: 1px solid var(--border-subtle); transition: background var(--dur-1) var(--ease); }
   .row:hover { background: var(--bg-hover); }
-  .row input { margin-top: 3px; accent-color: var(--accent); }
+  .row input { margin-top: 3px; accent-color: var(--color-ink); }
   .row .body { flex: 1; min-width: 0; }
   .row .top { font-size: 13px; }
   .row .idx { color: var(--fg-subtle); margin-right: 6px; }
   .row .prev { color: var(--fg); }
-  .row .tag { font-size: 11px; color: var(--warning-fg); background: var(--warning-bg); border-radius: var(--radius-pill); padding: 1px 9px; margin-left: 6px; }
+  .row .tag { font-size: 11px; color: var(--fg); background: var(--bg-muted); border: 1px solid var(--border); border-radius: var(--radius-tag); padding: 1px 9px; margin-left: 6px; }
   .row .warn { font-size: 11px; color: var(--danger); margin-left: 6px; }
   .right { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg-subtle); }
   .right iframe { flex: 1; border: 0; width: 100%; background: var(--bg-subtle); }
-  footer { border-top: 1px solid var(--border); background: var(--bg); padding: 12px 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  footer button { height: 36px; padding: 0 20px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
-    background: transparent; color: var(--fg); font-family: var(--font-mono); font-size: 13px; cursor: pointer; transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
-  footer button:hover { background: var(--bg-hover); border-color: var(--fg); }
+  footer { position: sticky; bottom: 0; z-index: 10; padding: 12px 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    background: var(--bg-subtle); border-top: 1px solid var(--border); }
+  footer button { height: 36px; padding: 0 20px; border: 1px solid var(--border-strong); border-radius: var(--radius-button);
+    background: transparent; color: var(--fg); font-family: var(--font-sans); font-size: 13px; font-weight: 500; cursor: pointer; transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+  footer button:hover { background: var(--bg-hover); }
   footer button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-  footer button.primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-bg); color: var(--btn-primary-fg); font-weight: 500; }
+  footer button.primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-bg); color: var(--btn-primary-fg); }
   footer button.primary:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); }
   footer .status { flex: 1; font-size: 13px; color: var(--fg-muted); min-width: 200px; }
   footer .status.err { color: var(--danger); }
