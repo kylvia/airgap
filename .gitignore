@@ -3,3 +3,4 @@ dist/
 *.ccpack
 .DS_Store
 .history/
+.superpowers/
