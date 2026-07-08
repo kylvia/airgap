@@ -40,7 +40,7 @@ One extraction/detection core, multiple exits:
 - `src/redact.ts` — `createRedactor(scan)` shares one consistent secret→placeholder map across transcript and all sidecars (`<RULEID>-REDACTED-<random6hex>`, per-pack random). Replaces longest secrets first, then **re-scans the output and fails closed** if anything still matches.
 - `src/ccpack.ts` — `.ccpack` = plain zip (`manifest.json`, `transcript.jsonl`, `subagents/*`, `tool-results/*`). Rejects absolute paths and `..` on read (zip-slip). Absolute paths tokenized to `{{PROJECT_ROOT}}` / `{{HOME}}` at pack time.
 - `src/commands/` — one `registerX(program)` per subcommand (scan/pack/open/show/share/doctor), wired in `src/index.ts` via commander.
-- `src/render/` — `turns.ts` converts records → `Turn[]` for both dialects; `markdown.ts` / `html.ts` (hand-rolled md→html, no third-party md lib) / `screenshot.ts` (PNG via system Chrome, zero puppeteer dep); `theme.ts` is the single source of truth for all visual design tokens (Monad style — warm parchment + serif headings + mono UI; dark mode via `prefers-color-scheme`).
+- `src/render/` — `turns.ts` converts records → `Turn[]` for both dialects; `markdown.ts` / `html.ts` (hand-rolled md→html, no third-party md lib) / `screenshot.ts` (PNG via system Chrome, zero puppeteer dep); `theme.ts` is the single source of truth for Evergreen visual tokens (linen canvas, bone cards, ink text/actions, sage accent wash; dark mode via `prefers-color-scheme`).
 - `src/server/` — local web UI for `share` (pick turns, preview, export long-image).
 - `plugin/` — Claude Code plugin: slash commands that shell out to `npx airgap`, plus a PreCompact hook snapshotting transcripts to `~/.airgap/rescue/`.
 
@@ -53,7 +53,7 @@ One extraction/detection core, multiple exits:
 - Redaction mutates only string values through `walkStrings` (metadata keys skipped), then re-serializes to `raw` — `uuid`/`parentUuid`/`tool_use_id`/`signature` must be byte-identical before/after (tests assert this).
 - `open` forks: fresh `sessionId` via randomUUID, rewrite sessionId/cwd fields, leave the `uuid`/`parentUuid` tree intact.
 - Local validation against real `~/.claude` / `~/.codex` data is fine, but never modify it.
-- **Any HTML/CSS change follows the visual spec** — `design.md` (Monad light theme, full component specs + constraints) and `design.dark.md` (dark values); `demo.md` is the source reference. Colors live only in `src/render/theme.ts` as `var(--x)` — never hard-code hex; headings are serif weight 400 (never bold), body/UI is mono, no shadows (1px borders + pill buttons); dark mode is CSS-only; don't touch the DOM/class/id anchors the JS and tests lock. Read `design.md` before editing any `<style>`.
+- **Any HTML/CSS change follows the Evergreen visual spec** — `design.md` (light specs + implementation constraints) and `design.dark.md` (dark token strategy); `demo.md` is the concise style reference. Colors live only in `src/render/theme.ts` as `var(--x)` — never hard-code hex. Exported HTML, iframe preview, and share shell use zero remote assets. Primary action is a black pill; sage is accent wash only. Do not add CSS backdrop filters or translucent toolbar material. Preserve DOM/class/id anchors used by JS and tests. Read `design.md` before editing any `<style>`.
 
 ## Tests
 

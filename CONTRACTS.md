@@ -57,12 +57,12 @@ Node ≥18，TS strict。测试用 vitest，放 `test/`，fixtures 放 `test/fix
   - Claude：type=user 且 message.content 含用户文本（非 tool_result 承载、非 isMeta）开启新 turn；其后 assistant 记录的 text/thinking/tool_use block 归入该 turn；tool_use 折叠为一行 `工具名: input 摘要（≤80 字符）`
   - Codex：response_item 线性流，message role=user 开新 turn，输出同理
 - `src/render/markdown.ts` — `export function renderMarkdown(turns: Turn[], meta: { title: string; date: string }): string`
-- `src/render/html.ts` — `export function renderHtml(turns: Turn[], meta): string` — 单文件、聊天气泡风格：用户=右侧绿色气泡（#95ec69），AI=白卡片，代码块深底高亮，工具行灰色斜体折叠；样式参考 `/private/tmp/claude-501/-Users-tester-demo-proj/372d5a9b-4f96-4bb2-b842-0be2db512d2e/scratchpad/会话片段-最后两轮.html`（可读取）；markdown→html 的轻量转换自写（标题/粗体/列表/代码块/行内码/链接即可，不引第三方 md 库）
+- `src/render/html.ts` — `export function renderHtml(turns: Turn[], meta): string` — Evergreen 单文件 transcript HTML：linen canvas、bone card、ink text/actions、sage wash；消息、thinking、warning、toolcard 都走 flat card/toolcard 样式，靠 1px 边框、10px radius、黑色主按钮和 ghost 次按钮建立层级；markdown→html 的轻量转换自写（标题/粗体/列表/代码块/行内码/链接即可，不引第三方 md 库）
 - `src/commands/show.ts`
   - `export function registerShow(program: Command): void`
   - `airgap show [--last N] [--pick] [--session <prefix>] [--md|--html|--png] [--out <file>]`
   - `--pick`：@clack/prompts multiselect，选项 label=`第N轮 <用户文本前40字>`
-  - 默认 `--html`；`--png` 用 puppeteer-core 动态 import + 常见 Chrome 路径探测，找不到则报错并提示用 --html
+  - 默认 `--html`；`--png` 用系统 Chrome + DevTools Protocol 生成，找不到 Chrome 则报错并提示用 --html
   - 出图前对选中内容跑 scan（契约 `scanString` mock 同 B 组规则），有命中先列出并要求确认（--yes 跳过）
 - 测试：`test/turns.test.ts`（fixture jsonl → turns）、`test/render.test.ts`（md/html snapshot 要点断言）
 
