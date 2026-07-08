@@ -11,11 +11,11 @@ Evergreen is the compact visual reference for airgap's human-facing HTML: `airga
 |------|-------|-----|
 | Linen canvas | `#edede2` | Page and preview background |
 | Bone card | `#fffff3` | Transcript cards, panels, controls |
-| Ink | `#000000` | Primary text, borders, primary action fill |
+| Ink | `#000000` | Primary text, structural hairlines, primary action fill |
 | Charcoal | `#333333` | Secondary text and subdued metadata |
 | Sage | `#beedc0` | Avatar, small markers, header wash only |
 
-Sage is botanical atmosphere, not a CTA color. Use it as a light wash or small marker; keep links, borders, and primary actions ink-led.
+Sage is botanical atmosphere, not a CTA color. Structural card/toolcard borders are ink/rgba hairlines. Sage may appear as small markers, narrow accent strips, and the header wash; keep links and primary actions ink-led.
 
 ## Typography
 
@@ -26,18 +26,19 @@ Sage is botanical atmosphere, not a CTA color. Use it as a light wash or small m
 
 ## Shape And Depth
 
-- Cards and toolcards: 10px radius, 1px ink hairline border, no shadow.
+- Cards and toolcards: 10px radius, 1px ink/rgba structural hairline border, no shadow.
 - Buttons: primary is a black pill with white text; secondary is a ghost pill with ink border.
 - Page bars: flat paper surfaces, no translucent toolbar material and no CSS backdrop filters.
 - Header sage wash may use ordinary `filter: blur(...)`; that is a foreground visual softening effect.
 
 ## Components
 
-- `.msg-user`: compact user bubble/card aligned with transcript rhythm.
-- `.msg-ai`: bone transcript card with ink border.
+- `.msg-user`: compact user bubble/card aligned with transcript rhythm; it may carry a narrow sage marker strip.
+- `.msg-ai`: bone transcript card with an ink/rgba hairline border.
 - `.toolcard`: flat execution card with visible tool name, status, input, and optional output summary.
-- Thinking disclosure: quiet, readable, and structurally stable.
+- Thinking disclosure: quiet, readable, and structurally stable; it may use a small glyph/emoji label and a narrow sage marker.
 - Warning banner: clear text plus visual emphasis, not color-only.
+- Tool, thinking, turn, and user-facing labels may include small glyph/emoji labels for compact recognition; this is presentation-only.
 - Primary/ghost buttons: stable pill controls for share and export actions.
 
 ## Constraints

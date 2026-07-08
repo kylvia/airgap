@@ -57,7 +57,8 @@ Node ≥18，TS strict。测试用 vitest，放 `test/`，fixtures 放 `test/fix
   - Claude：type=user 且 message.content 含用户文本（非 tool_result 承载、非 isMeta）开启新 turn；其后 assistant 记录的 text/thinking/tool_use block 归入该 turn；tool_use 折叠为一行 `工具名: input 摘要（≤80 字符）`
   - Codex：response_item 线性流，message role=user 开新 turn，输出同理
 - `src/render/markdown.ts` — `export function renderMarkdown(turns: Turn[], meta: { title: string; date: string }): string`
-- `src/render/html.ts` — `export function renderHtml(turns: Turn[], meta): string` — Evergreen 单文件 transcript HTML：linen canvas、bone card、ink text/actions、sage wash；消息、thinking、warning、toolcard 都走 flat card/toolcard 样式，靠 1px 边框、10px radius、黑色主按钮和 ghost 次按钮建立层级；markdown→html 的轻量转换自写（标题/粗体/列表/代码块/行内码/链接即可，不引第三方 md 库）
+- `src/render/html.ts` — `export function renderHtml(turns: Turn[], meta): string` — Evergreen 单文件 transcript HTML：header、turn blocks、footer；linen canvas、bone card、ink/rgba structural hairlines、sage header wash/markers；消息、toolcard、thinking disclosure、code block 都走 flat transcript card/toolcard 样式，靠 1px 边框与 10px radius 建立层级；markdown→html 的轻量转换自写（标题/粗体/列表/代码块/行内码/链接即可，不引第三方 md 库）
+- `src/server/page.ts` — `export function renderPage(defaultSession?: string): string` — `airgap share` 本地 picker/share shell：会话选择、左侧 turn list、右侧 iframe preview、warning banner、footer primary/ghost buttons 和 export 控件都归这里；`buildPreviewShell()` 只复用 transcript 外层结构与 `CHAT_CSS`，必须与 `renderHtml()` 的 header/turn/footer 结构保持同步
 - `src/commands/show.ts`
   - `export function registerShow(program: Command): void`
   - `airgap show [--last N] [--pick] [--session <prefix>] [--md|--html|--png] [--out <file>]`
