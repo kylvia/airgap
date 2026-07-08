@@ -21,6 +21,11 @@ export const THEME_CSS = `
     --radius-link: 30px;
     --radius-button: 40.5px;
     --radius-tag: 46px;
+    /* Compatibility aliases while remaining CSS migrates to Evergreen radius tokens. */
+    --radius-sm: var(--radius-input);
+    --radius-md: var(--radius-card);
+    --radius-pill: var(--radius-button);
+    --shadow-card: none;
 
     --ease: cubic-bezier(0.4, 0, 0.2, 1);
     --dur-1: 120ms;
