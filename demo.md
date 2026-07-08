@@ -13,7 +13,7 @@ Evergreen is the compact visual reference for airgap's human-facing HTML: `airga
 | Bone card | `#fffff3` | Transcript cards, panels, controls |
 | Ink | `#000000` | Primary text, structural hairlines, primary action fill |
 | Charcoal | `#333333` | Secondary text and subdued metadata |
-| Sage | `#beedc0` | Avatar, small markers, header wash only |
+| Sage | `#beedc0` | Small markers, narrow accent strips, header wash |
 
 Sage is botanical atmosphere, not a CTA color. Structural card/toolcard borders are ink/rgba hairlines. Sage may appear as small markers, narrow accent strips, and the header wash; keep links and primary actions ink-led.
 
