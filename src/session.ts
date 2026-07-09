@@ -29,6 +29,28 @@ export function sessionTitle(records: JsonlRecord[], info: SessionInfo): string 
   return `${base} · 会话片段`;
 }
 
+/**
+ * Stream-scan a transcript for its latest ai-title WITHOUT loading records into memory —
+ * cheap enough to run across the whole session-picker list. Lines are prefiltered by
+ * substring so non-matching lines are never JSON-parsed (claude writes/updates ai-title
+ * near the tail; codex has no such record → null). Returns null on any read error.
+ */
+export async function peekTitle(file: string): Promise<string | null> {
+  let title: string | null = null;
+  try {
+    for await (const { line } of streamLines(file)) {
+      if (!line.includes('"ai-title"')) continue;
+      const j = tryParse(line);
+      if (j && j["type"] === "ai-title" && typeof j["aiTitle"] === "string" && j["aiTitle"].trim()) {
+        title = j["aiTitle"].trim();
+      }
+    }
+  } catch {
+    return null;
+  }
+  return title;
+}
+
 /** --session prefix wins; otherwise the cwd-matching session, else the most recent. */
 export function pickSession(sessions: SessionInfo[], opts: { session?: string }): SessionInfo | null {
   if (opts.session) {

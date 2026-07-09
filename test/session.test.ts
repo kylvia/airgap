@@ -1,6 +1,9 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RuleMatch, SessionInfo, Turn } from "../src/types.js";
-import { pickSession, redactTurns, scanOneTurn, scanTurns, turnTag } from "../src/session.js";
+import { peekTitle, pickSession, redactTurns, scanOneTurn, scanTurns, turnTag } from "../src/session.js";
 
 describe("turnTag", () => {
   it("flags non-question user turns", () => {
@@ -120,5 +123,33 @@ describe("pickSession", () => {
   it("falls back to most recent when no cwd match", () => {
     const noCwd = [sess("aaa1", "/other", 300), sess("ccc3", "/other", 200)];
     expect(pickSession(noCwd, {})?.id).toBe("aaa1");
+  });
+});
+
+describe("peekTitle", () => {
+  async function jsonlFile(lines: string[]): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "airgap-title-"));
+    const file = path.join(dir, "s.jsonl");
+    await writeFile(file, lines.join("\n") + "\n", "utf8");
+    return file;
+  }
+
+  it("取最新一条 ai-title（claude 会追加更新，晚出现的赢）", async () => {
+    const f = await jsonlFile([
+      '{"type":"user","message":{"content":"hi"}}',
+      '{"type":"ai-title","aiTitle":"旧标题"}',
+      '{"type":"assistant","message":{"content":[]}}',
+      '{"type":"ai-title","aiTitle":"新标题"}',
+    ]);
+    expect(await peekTitle(f)).toBe("新标题");
+  });
+
+  it("没有 ai-title（codex / 未生成）→ null；空白标题不算", async () => {
+    expect(await peekTitle(await jsonlFile(['{"type":"user"}']))).toBeNull();
+    expect(await peekTitle(await jsonlFile(['{"type":"ai-title","aiTitle":"  "}']))).toBeNull();
+  });
+
+  it("文件不存在 → null，不抛", async () => {
+    expect(await peekTitle("/nonexistent/airgap-title.jsonl")).toBeNull();
   });
 });

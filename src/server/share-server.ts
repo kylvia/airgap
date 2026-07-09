@@ -13,7 +13,7 @@ import { extractTurns } from "../render/turns.js";
 import { renderHtml, renderTurnBlock } from "../render/html.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
-import { oneLine, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../session.js";
+import { oneLine, peekTitle, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../session.js";
 import { renderPage } from "./page.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
@@ -25,6 +25,8 @@ interface SessionSummary {
   project: string;
   source: string;
   mtimeMs: number;
+  /** latest ai-title (claude only); null → 前端回退 "<project> · 会话片段" */
+  title: string | null;
 }
 
 interface TurnData {
@@ -75,12 +77,16 @@ async function listSessions(limit: number, ensureId?: string): Promise<SessionSu
     const hit = sorted.find((s) => s.id === ensureId);
     if (hit) top.push(hit);
   }
-  return top.map((s) => ({
-    id: s.id,
-    project: s.cwd ? path.basename(s.cwd) : s.project,
-    source: s.source,
-    mtimeMs: s.mtimeMs,
-  }));
+  // 标题并行流扫（peekTitle 只 parse 命中 ai-title 预过滤的行，几十个会话数百 ms 级）
+  return Promise.all(
+    top.map(async (s) => ({
+      id: s.id,
+      project: s.cwd ? path.basename(s.cwd) : s.project,
+      source: s.source,
+      mtimeMs: s.mtimeMs,
+      title: await peekTitle(s.file),
+    })),
+  );
 }
 
 async function findSession(id: string): Promise<SessionInfo | null> {

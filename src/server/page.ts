@@ -135,7 +135,8 @@ async function loadSessions() {
   for (const s of sessions) {
     const o = document.createElement("option");
     o.value = s.id;
-    o.textContent = s.project + " · " + s.source + " · " + s.id.slice(0, 8) + " · " + rel(s.mtimeMs);
+    // 标题优先（区分度最高）；无标题（codex / 未生成）回退项目名。id 前缀对 UI 没有区分价值，不再展示。
+    o.textContent = (s.title || s.project + " · 会话片段") + " · " + s.source + " · " + rel(s.mtimeMs);
     sel.appendChild(o);
   }
   const pick = sessions.find((s) => s.id.startsWith(DEFAULT)) || sessions[0];
