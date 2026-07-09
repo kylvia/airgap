@@ -1,51 +1,53 @@
-# Evergreen — Style Reference
-> sunlit greenhouse on linen paper for airgap local transcript output
+# Dossier — Style Reference
+> minimalist-ui warm document interface for airgap local transcript output
 
 **Theme:** light-first, with a warm deep-paper dark variant.
 
-Evergreen is the compact visual reference for airgap's human-facing HTML: `airgap show` exported transcript HTML/PNG and the local `airgap share` picker UI. `design.md` and `design.dark.md` are the live specs; `src/render/theme.ts` is the only code source for color tokens.
+Dossier 是 airgap 面向人 HTML 的紧凑视觉参考：`airgap show` 导出 transcript HTML/PNG 与本地 `airgap share` picker UI。`design.md` 和 `design.dark.md` 是 live spec；`src/render/theme.ts` 是色彩 token 的唯一代码源。
 
 ## Tokens
 
 | Role | Value | Use |
 |------|-------|-----|
-| Linen canvas | `#edede2` | Page and preview background |
-| Bone card | `#fffff3` | Transcript cards, panels, controls |
-| Ink | `#000000` | Primary text, structural hairlines, primary action fill |
-| Charcoal | `#333333` | Secondary text and subdued metadata |
-| Sage | `#beedc0` | Small markers, narrow accent strips, header wash |
+| Warm bone | `#fbfbfa` | Page and preview canvas |
+| Paper | `#ffffff` | Cards, panels, controls |
+| Off-black | `#1a1a1a` | Primary text, hairlines, action fill (never pure #000) |
+| Charcoal | `#2f3437` | Secondary text |
+| Graphite | `#787774` | Muted metadata |
+| Pastel green | `#edf3ec` / `#346538` | ok / success |
+| Pastel red | `#fdebec` / `#9f2f2d` | err / danger |
+| Pastel yellow | `#fbf3db` / `#956400` | warning |
+| Pastel blue | `#e1f3fe` / `#1f6c9f` | info / tag |
 
-Sage is botanical atmosphere, not a CTA color. Structural card/toolcard borders are ink/rgba hairlines. Sage may appear as small markers, narrow accent strips, and the header wash; keep links and primary actions ink-led.
+Color is scarce: pastels are semantic only, never decoration or large fills. Structural card/toolcard borders are `#eaeaea` hairlines with no shadow.
 
 ## Typography
 
-- Headings: serif, weight 600, calm editorial contrast.
-- Body and UI: Rubik-like sans for readability in dense transcript output.
-- Technical content: mono for code, tool names, structured inputs, and compact metadata.
-- Exported HTML must not load remote fonts; use local/system font stacks only.
+- Headings: editorial serif (Newsreader / Instrument / Playfair fallback), weight 600, tight tracking -0.02em.
+- Body and UI: SF Pro / Geist-like sans. **Never Inter or Roboto.**
+- Technical content: mono (Geist Mono / SF Mono) for code, tool names, inputs, metadata.
+- Exported HTML must not load remote fonts; system stacks only.
 
 ## Shape And Depth
 
-- Cards and toolcards: 10px radius, 1px ink/rgba structural hairline border, no shadow.
-- Buttons: primary is a black pill with white text; secondary is a ghost pill with ink border.
-- Page bars: flat paper surfaces, no translucent toolbar material and no CSS backdrop filters.
-- Header sage wash may use ordinary `filter: blur(...)`; that is a foreground visual softening effect.
+- Cards and toolcards: 10px radius, 1px `#eaeaea` hairline, no shadow.
+- Buttons: primary is an off-black square button (6px radius, not a pill); secondary is a ghost square button with ink border.
+- Page bars: flat paper, no translucent toolbar material, no CSS backdrop filters.
 
 ## Components
 
-- `.msg-user`: compact user bubble/card aligned with transcript rhythm; it may carry a narrow sage marker strip.
-- `.msg-ai`: bone transcript card with an ink/rgba hairline border.
-- `.toolcard`: flat execution card with visible tool name, status, input, and optional output summary.
-- Thinking disclosure: quiet, readable, and structurally stable; it may use a small glyph/emoji label and a narrow sage marker.
-- Warning banner: clear text plus visual emphasis, not color-only.
-- Tool, thinking, turn, and user-facing labels may include small glyph/emoji labels for compact recognition; this is presentation-only.
-- Primary/ghost buttons: stable pill controls for share and export actions.
+- `.msg-user`: right-aligned paper bubble with a thin green accent edge; never black fill for long user text.
+- `.msg-ai`: paper transcript card with a `#eaeaea` hairline border.
+- `.toolcard`: flat execution card, tool name + status glyph (`✓` / `✗`), mono input/output; ok = pastel green, err = pastel red.
+- Thinking disclosure: quiet, inline SVG mark (no emoji), charcoal text, hairline left rule.
+- Warning banner: pastel-yellow band with an inline SVG warn mark plus text, never color-only.
+- No emoji anywhere in HTML/UI — use inline SVG primitives. Markdown text export keeps its glyphs.
 
 ## Constraints
 
-- Colors live in `src/render/theme.ts`; docs mirror the implementation and must be updated with token changes.
-- Exported HTML, iframe preview, and share shell use zero remote assets: no remote fonts, images, scripts, or CSS.
+- Colors live in `src/render/theme.ts`; docs mirror the implementation and must update with token changes.
+- Exported HTML, iframe preview, and share shell use zero remote assets.
 - Preserve JS/DOM anchors documented in `design.md`.
-- `src/server/page.ts` `buildPreviewShell()` must stay aligned with `src/render/html.ts` `renderHtml()` outer transcript structure.
-- Template strings hold CSS/HTML/JS; avoid bare interpolation markers and bare backticks outside existing intentional patterns.
-- Dark mode mainly overrides tokens in `theme.ts`; small `CHAT_CSS` dark corrections are allowed when component-level visuals need adjustment.
+- `buildPreviewShell()` must stay aligned with `renderHtml()` outer transcript structure.
+- Template strings hold CSS/HTML/JS; avoid bare interpolation markers and bare backticks.
+- Dark mode overrides tokens in `theme.ts` via `prefers-color-scheme: dark`; semantic aliases follow automatically.

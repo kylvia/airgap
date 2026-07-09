@@ -1,29 +1,31 @@
 ---
-version: 5
+version: 6
 name: airgap
 theme: light
-style: Evergreen — sunlit greenhouse on linen paper adapted for a local security CLI
-description: airgap 面向人的 HTML 产出的视觉规范，采用 Refero Evergreen：linen canvas、bone card、black ink、sage mint botanical accent。token 的代码实现在 src/render/theme.ts（唯一权威源，改值必改那里并同步本文档）。
+style: Dossier — minimalist-ui warm document interface for a local security CLI
+description: airgap 面向人的 HTML 产出的视觉规范，采用 minimalist-ui 的 Dossier 方向：warm bone canvas、paper-white card、off-black action/text、muted 多色 pastel 语义色。token 的代码实现在 src/render/theme.ts（唯一权威源，改值必改那里并同步本文档）。
 ---
 
-# airgap · Evergreen
+# airgap · Dossier
 
-airgap 有两处面向人的 HTML 产出：`airgap show` 的单文件 HTML/PNG，以及 `airgap share` 的本地 picker UI。二者共享 `src/render/theme.ts` 的 Evergreen token。
+airgap 有两处面向人的 HTML 产出：`airgap show` 的单文件 HTML/PNG，以及 `airgap share` 的本地 picker UI。二者共享 `src/render/theme.ts` 的 Dossier token。
 
-核心视觉：`#edede2` linen canvas、`#fffff3` bone card、`#000000` ink action/text/strong hairline、`#333333` charcoal secondary text、`#beedc0` sage mint accent wash。Structural card/toolcard borders are ink/rgba hairlines. Sage may appear as small markers, narrow accent strips, and the header wash; it does not become button fill, link color, or a large background field.
+核心视觉：`#fbfbfa` warm bone canvas、`#ffffff` paper card、`#1a1a1a` off-black（正文/主操作/hairline，绝不用纯 `#000`）、`#2f3437` charcoal 次级文本、`#787774` graphite metadata。色彩是稀缺资源：muted pastel（green `#346538` / red `#9f2f2d` / yellow `#956400` / blue `#1f6c9f`）只承载语义（ok / err / warn / info），不做装饰、不做大面积填充。
 
-按钮：主操作一律黑色 pill，白字；次操作 ghost pill。结构性卡片/toolcard：10px radius、1px ink/rgba hairline border、无 shadow；局部 sage 标记条不改变这一边界规则。标题：serif 600；正文/UI：Rubik-like sans；技术内容：mono。share header/footer 是 flat paper bar，不再使用半透明工具栏材质或 CSS backdrop filters。Header 的 sage wash 可以使用普通 `filter: blur(...)` 做柔化；禁止的是依赖背后内容取样的 toolbar 材质，不是所有 blur。
+按钮：主操作是 off-black 方按钮（6px 圆角，**不是 pill**），白字；次操作 ghost 方按钮，ink 边框。结构性卡片/toolcard：10px radius、1px `#eaeaea` hairline border、无 shadow。标题：editorial serif 600，tight tracking（-0.02em）；正文/UI：SF Pro / Geist 类 sans（**禁 Inter / Roboto**）；技术内容：mono。页面 bar 是 flat paper，无半透明工具栏材质、无 CSS backdrop filters。
+
+HTML-UI 一律零 emoji：thinking 标记、warning 标记等用 inline SVG（见 `airgapMark` / `thinkingMark` / share 的 `warnMark`）。`renderMarkdown` 的纯文本导出（💭🔧）不属 UI，保留。
 
 ## Implementation Constraints
 
-色值只在 `src/render/theme.ts`；导出的 HTML、iframe preview、share shell 都必须零远程资产：不加载 remote fonts/images/scripts/CSS。`CHAT_CSS` 不使用 CSS backdrop filters；普通 `filter: blur(...)` 可用于 header sage wash。
+色值只在 `src/render/theme.ts`；导出的 HTML、iframe preview、share shell 都必须零远程资产：不加载 remote fonts/images/scripts/CSS，只用系统字体栈。禁 CSS backdrop filters 与半透明 toolbar 材质。
 
-保留 `src/server/page.ts` 里的 JS/DOM 锚点：IDs `sess`、`sbanner`、`list`、`preview`、`status`、`count`、`all`、`none`、`done`；属性 `data-a`、`data-f`；iframe internals `pv-turn-*`、`pv-sub`；row/list anchors `.row .prev`、`.tag`、`.warn`。
+保留 `src/server/page.ts` 里的 JS/DOM 锚点：IDs `sess`、`sbanner`、`list`、`preview`、`status`、`count`、`all`、`none`、`done`；属性 `data-a`、`data-f`；iframe internals `pv-turn-*`、`pv-sub`；row/list anchors `.row .prev`、`.tag`、`.warn`（含 `.wicon` SVG 标记）。
 
 `src/server/page.ts` 的 `buildPreviewShell()` 必须与 `src/render/html.ts` 的 `renderHtml()` 外层 transcript 结构保持同步，避免 share 预览和最终导出长图漂移。
 
-CSS/HTML/JS 写在 template strings 里；避免裸 `${` 和裸反引号。故意插值沿用现有模式：`THEME_CSS`、`chatCss`、`def`、`airgapMark(n)`、`JSON.stringify(...)`。
+CSS/HTML/JS 写在 template strings 里；避免裸 `${` 和裸反引号。故意插值沿用现有模式：`THEME_CSS`、`chatCss`、`def`、`airgapMark(n)`、`WARN_MARK`、`JSON.stringify(...)`。
 
-最小组件清单：transcript 端 `.msg-user`、`.msg-ai`、`.toolcard`、thinking disclosure；share shell 端 warning banner、primary button、ghost button。
+最小组件清单：transcript 端 `.msg-user`、`.msg-ai`、`.toolcard`、thinking disclosure（inline SVG 标记）；share shell 端 warning banner、primary 方按钮、ghost 方按钮。
 
 验证纪律：文档/视觉约束变更至少跑静态 greps；实现变更还要跑 `npm test` 和 `npm run typecheck`。不要启动或重启用户服务；如需 preview server，先问用户。PNG 默认浅色，深色只在 `prefers-color-scheme: dark` 中。
