@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import type { RuleMatch, SessionInfo, ToolDisplay, Turn } from "../types.js";
 import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "../types.js";
+import { loadConfig, sessionListLimit } from "../config.js";
 import { discoverSessions } from "../discovery.js";
 import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
@@ -16,8 +17,6 @@ import { oneLine, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns,
 import { renderPage } from "./page.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
-/** 下拉只放最近 N 个（全量几百项难翻）；更早的用 `airgap share --session <前缀>` 直开。 */
-const MAX_LIST = 50;
 
 // ---------- API 数据形态 ----------
 
@@ -66,11 +65,12 @@ function parseToolDisplay(v: unknown): ToolDisplay {
 
 // ---------- 会话读取 ----------
 
-async function listSessions(ensureId?: string): Promise<SessionSummary[]> {
+/** 下拉只放最近 limit 个（config: share.sessionListLimit，常用 10/20/50）；更早的用 `airgap share --session <前缀>` 直开。 */
+async function listSessions(limit: number, ensureId?: string): Promise<SessionSummary[]> {
   const sessions = await discoverSessions({});
   const sorted = [...sessions].sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const top = sorted.slice(0, MAX_LIST);
-  // --session 指定的会话若比 MAX_LIST 还老，补进列表尾——否则前端下拉里没有它，预选会静默落空。
+  const top = sorted.slice(0, limit);
+  // --session 指定的会话若比 limit 还老，补进列表尾——否则前端下拉里没有它，预选会静默落空。
   if (ensureId && !top.some((s) => s.id === ensureId)) {
     const hit = sorted.find((s) => s.id === ensureId);
     if (hit) top.push(hit);
@@ -268,6 +268,7 @@ export interface ShareServer {
 }
 
 export async function startShareServer(opts: { port?: number; defaultSession?: string }): Promise<ShareServer> {
+  const listLimit = sessionListLimit(await loadConfig()); // 启动时读一次；改 ~/.airgap/config.json 后重启生效
   let idleTimer: NodeJS.Timeout;
   const touch = (): void => {
     clearTimeout(idleTimer);
@@ -298,7 +299,7 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
       return;
     }
     if (req.method === "GET" && p === "/api/sessions") {
-      sendJson(res, 200, { sessions: await listSessions(opts.defaultSession) });
+      sendJson(res, 200, { sessions: await listSessions(listLimit, opts.defaultSession) });
       return;
     }
     if (req.method === "GET" && p.startsWith("/api/session/")) {
