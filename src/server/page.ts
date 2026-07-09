@@ -129,8 +129,7 @@ let pvReady = false;          // 预览 iframe 是否已加载好
 const $ = (id) => document.getElementById(id);
 function setStatus(msg, err) { const s = $("status"); s.textContent = msg; s.className = "status" + (err ? " err" : ""); }
 
-async function loadSessions() {
-  const r = await fetch("/api/sessions"); const { sessions } = await r.json();
+function fillOptions(sessions, keep) {
   const sel = $("sess"); sel.innerHTML = "";
   for (const s of sessions) {
     const o = document.createElement("option");
@@ -139,10 +138,33 @@ async function loadSessions() {
     o.textContent = (s.title || s.project + " · 会话片段") + " · " + s.source + " · " + rel(s.mtimeMs);
     sel.appendChild(o);
   }
+  if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+}
+
+async function loadSessions() {
+  const r = await fetch("/api/sessions"); const { sessions } = await r.json();
+  fillOptions(sessions, null);
+  const sel = $("sess");
   const pick = sessions.find((s) => s.id.startsWith(DEFAULT)) || sessions[0];
   if (pick) { sel.value = pick.id; await loadSession(pick.id); }
   sel.onchange = () => loadSession(sel.value);
 }
+
+// ai-title 会随会话演进被 Claude 持续更新——窗口重获焦点时（从 Claude Code 切回来的瞬间）
+// 静默刷新下拉标题/排序，保持当前选中与预览不动。5s 节流，防止频繁切窗口反复全量扫标题。
+let lastListRefresh = 0;
+async function refreshSessions() {
+  if (!detail) return;
+  const r = await fetch("/api/sessions?ensure=" + encodeURIComponent(detail.id));
+  if (!r.ok) return;
+  const { sessions } = await r.json();
+  fillOptions(sessions, detail.id);
+}
+window.addEventListener("focus", () => {
+  if (Date.now() - lastListRefresh < 5000) return;
+  lastListRefresh = Date.now();
+  refreshSessions().catch(() => {});
+});
 
 function rel(ms) {
   const d = (Date.now() - ms) / 1000;

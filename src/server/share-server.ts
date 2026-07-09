@@ -305,7 +305,9 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
       return;
     }
     if (req.method === "GET" && p === "/api/sessions") {
-      sendJson(res, 200, { sessions: await listSessions(listLimit, opts.defaultSession) });
+      // ?ensure=<id>：前端焦点刷新时保证「当前正在看的会话」始终在列表里（可能比 limit 老）
+      const ensure = url.searchParams.get("ensure") ?? opts.defaultSession;
+      sendJson(res, 200, { sessions: await listSessions(listLimit, ensure ?? undefined) });
       return;
     }
     if (req.method === "GET" && p.startsWith("/api/session/")) {
