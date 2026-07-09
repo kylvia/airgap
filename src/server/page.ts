@@ -54,7 +54,7 @@ ${THEME_CSS}
   }
   .row { display: flex; gap: 8px; padding: 10px 16px; align-items: flex-start; cursor: pointer; border-bottom: 1px solid var(--border-subtle); transition: background var(--dur-1) var(--ease); }
   .row:hover { background: var(--bg-hover); }
-  .row input { margin-top: 3px; accent-color: var(--fg); }
+  .row input { margin-top: 3px; accent-color: var(--fg); cursor: pointer; }
   .row .body { flex: 1; min-width: 0; }
   .row .top { font-size: 13px; }
   .row .idx { color: var(--fg-subtle); margin-right: 6px; }
@@ -176,9 +176,16 @@ async function loadSession(id, keepSelection) {
 function renderList() {
   const list = $("list"); list.innerHTML = "";
   for (const t of detail.turns) {
-    const row = document.createElement("label"); row.className = "row";
+    // div 而非 label：行正文点击=预览定位查看，勾选只属于 checkbox 本身——两个动作解绑。
+    const row = document.createElement("div"); row.className = "row";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = selected.has(t.index);
+    cb.setAttribute("aria-label", "勾选第 " + t.index + " 轮");
     cb.onchange = () => { cb.checked ? selected.add(t.index) : selected.delete(t.index); syncPreview(cb.checked ? t.index : null); updateCount(); };
+    row.onclick = (e) => {
+      if (e.target === cb) return;
+      if (selected.has(t.index)) syncPreview(t.index);
+      else setStatus("第 " + t.index + " 轮未勾选，勾选后才会出现在预览里。");
+    };
     const body = document.createElement("div"); body.className = "body";
     const top = document.createElement("div"); top.className = "top";
     top.innerHTML = '<span class="idx">第' + t.index + '轮</span><span class="prev"></span>'
