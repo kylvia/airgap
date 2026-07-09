@@ -17,38 +17,53 @@ export async function readRecords(file: string): Promise<JsonlRecord[]> {
   return records;
 }
 
-/** Best-effort human title: latest ai-title record, else "<project> · 会话片段". */
+/**
+ * Best-effort human title. Precedence: latest custom-title (user rename — Claude keeps
+ * appending fresh ai-title records even AFTER a rename, so a rename must win forever,
+ * not just until the next ai-title) > latest ai-title > "<project> · 会话片段".
+ */
 export function sessionTitle(records: JsonlRecord[], info: SessionInfo): string {
+  let ai: string | null = null;
   for (let i = records.length - 1; i >= 0; i--) {
     const j = records[i]?.json;
-    if (j && j["type"] === "ai-title" && typeof j["aiTitle"] === "string" && j["aiTitle"].trim()) {
-      return j["aiTitle"].trim();
+    if (!j) continue;
+    if (j["type"] === "custom-title" && typeof j["customTitle"] === "string" && j["customTitle"].trim()) {
+      return j["customTitle"].trim(); // backwards scan → first hit is the latest rename
+    }
+    if (ai === null && j["type"] === "ai-title" && typeof j["aiTitle"] === "string" && j["aiTitle"].trim()) {
+      ai = j["aiTitle"].trim();
     }
   }
+  if (ai !== null) return ai;
   const base = info.cwd ? path.basename(info.cwd) : info.project;
   return `${base} · 会话片段`;
 }
 
 /**
- * Stream-scan a transcript for its latest ai-title WITHOUT loading records into memory —
- * cheap enough to run across the whole session-picker list. Lines are prefiltered by
- * substring so non-matching lines are never JSON-parsed (claude writes/updates ai-title
- * near the tail; codex has no such record → null). Returns null on any read error.
+ * Stream-scan a transcript for its title WITHOUT loading records into memory — cheap
+ * enough to run across the whole session-picker list. Same precedence as sessionTitle:
+ * custom-title (user rename) beats ai-title regardless of order. Lines are prefiltered
+ * by the shared `-title"` substring so non-matching lines are never JSON-parsed
+ * (codex has neither record type → null). Returns null on any read error.
  */
 export async function peekTitle(file: string): Promise<string | null> {
-  let title: string | null = null;
+  let ai: string | null = null;
+  let custom: string | null = null;
   try {
     for await (const { line } of streamLines(file)) {
-      if (!line.includes('"ai-title"')) continue;
+      if (!line.includes('-title"')) continue;
       const j = tryParse(line);
-      if (j && j["type"] === "ai-title" && typeof j["aiTitle"] === "string" && j["aiTitle"].trim()) {
-        title = j["aiTitle"].trim();
+      if (!j) continue;
+      if (j["type"] === "custom-title" && typeof j["customTitle"] === "string" && j["customTitle"].trim()) {
+        custom = j["customTitle"].trim();
+      } else if (j["type"] === "ai-title" && typeof j["aiTitle"] === "string" && j["aiTitle"].trim()) {
+        ai = j["aiTitle"].trim();
       }
     }
   } catch {
     return null;
   }
-  return title;
+  return custom ?? ai;
 }
 
 /** --session prefix wins; otherwise the cwd-matching session, else the most recent. */

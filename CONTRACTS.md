@@ -72,10 +72,11 @@ Node ≥18，TS strict。测试用 vitest，放 `test/`，fixtures 放 `test/fix
 - 位置：`~/.claude/projects/<munged-cwd>/<sid>.jsonl`；munge = cwd 的 `/` 与 `.` → `-`
 - sidecar：`<同目录>/<sid>/subagents/agent-*.jsonl`（+ `agent-*.meta.json`）、`<同目录>/<sid>/tool-results/toolu_*.txt`
 - 每行一个 JSON：公共字段 `uuid`、`parentUuid`（单亲指针→树）、`promptId`（同一用户轮共享）、`isSidechain`、`isMeta`、`sessionId`、`timestamp`、`cwd`、`version`、`gitBranch`、`type`
-- type 取值：`user`、`assistant`、`system`、`attachment`、`mode`、`permission-mode`、`ai-title`、`last-prompt`、`file-history-snapshot`、`queue-operation`、`progress`、`summary`
+- type 取值：`user`、`assistant`、`system`、`attachment`、`mode`、`permission-mode`、`ai-title`、`custom-title`、`last-prompt`、`file-history-snapshot`、`queue-operation`、`progress`、`summary`
+- 标题记录（验证于 2.1.198）：`ai-title`（`aiTitle` 字段）随会话演进被反复追加，最新为准；用户在 UI 里 rename 会追加 `custom-title`（`customTitle` 字段），**rename 之后 ai-title 仍会继续追加**——展示语义是「最新 custom-title 永久优先于任何 ai-title」，不是「取最后一条标题记录」
 - assistant 记录：`message` 为完整 API message（`id`=msg_*、`content[]` 块：`text`/`thinking`/`tool_use`）；**同一次 API 响应拆成多条 jsonl 记录，共享 message.id**；thinking 块带加密 `signature` 字段
 - tool_result 以 user 记录承载：`message.content[].{type:"tool_result",tool_use_id}` + 顶层 `toolUseResult`（结构化原始结果，可能含 stdout/stderr）+ `sourceToolAssistantUUID`
-- **闭包规则（slice 必须满足）**：(a) 沿 parentUuid 的连续子链；(b) tool_use↔tool_result 必须配对，不许跨切割边界断开；(c) 同 message.id 的多条记录不可拆散；(d) 引用的 subagents 与 tool-results 文件一并携带；(e) 链头记录 parentUuid 重写为 null；(f) `mode`/`ai-title`/`attachment`/`last-prompt`/`file-history-snapshot`/`queue-operation`/`progress` 属会话级状态可丢弃（计入 droppedTypes），带 `isCompactSummary` 的 user 记录必须保留
+- **闭包规则（slice 必须满足）**：(a) 沿 parentUuid 的连续子链；(b) tool_use↔tool_result 必须配对，不许跨切割边界断开；(c) 同 message.id 的多条记录不可拆散；(d) 引用的 subagents 与 tool-results 文件一并携带；(e) 链头记录 parentUuid 重写为 null；(f) `mode`/`ai-title`/`custom-title`/`attachment`/`last-prompt`/`file-history-snapshot`/`queue-operation`/`progress` 属会话级状态可丢弃（计入 droppedTypes），带 `isCompactSummary` 的 user 记录必须保留
 
 ## Codex rollout 结构
 

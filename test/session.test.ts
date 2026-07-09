@@ -153,3 +153,29 @@ describe("peekTitle", () => {
     expect(await peekTitle("/nonexistent/airgap-title.jsonl")).toBeNull();
   });
 });
+
+describe("peekTitle: custom-title（用户 rename）优先", () => {
+  async function jsonlFile(lines: string[]): Promise<string> {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "airgap-ctitle-"));
+    const file = path.join(dir, "s.jsonl");
+    await writeFile(file, lines.join("\n") + "\n", "utf8");
+    return file;
+  }
+
+  it("rename 之后 Claude 仍会追加 ai-title——custom-title 必须永久赢，不是取最后一条", async () => {
+    const f = await jsonlFile([
+      '{"type":"ai-title","aiTitle":"AI 起的标题"}',
+      '{"type":"custom-title","customTitle":"我改的标题"}',
+      '{"type":"ai-title","aiTitle":"AI 又起了一个"}',
+    ]);
+    expect(await peekTitle(f)).toBe("我改的标题");
+  });
+
+  it("多次 rename 取最新一条 custom-title", async () => {
+    const f = await jsonlFile([
+      '{"type":"custom-title","customTitle":"第一次改"}',
+      '{"type":"custom-title","customTitle":"第二次改"}',
+    ]);
+    expect(await peekTitle(f)).toBe("第二次改");
+  });
+});
