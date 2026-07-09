@@ -89,6 +89,11 @@ ${THEME_CSS}
     <span class="logo">${airgapMark(20)}<span>airgap</span></span>
     <span style="font-size:13px;color:var(--fg-muted)">分享会话片段</span>
     <select id="sess"></select>
+    <select id="limit" title="会话下拉列出最近多少条（改动写入 ~/.airgap/config.json）">
+      <option value="10">近 10 条</option>
+      <option value="20">近 20 条</option>
+      <option value="50">近 50 条</option>
+    </select>
   </header>
   <div class="sbanner" id="sbanner"></div>
   <main>
@@ -141,9 +146,21 @@ function fillOptions(sessions, keep) {
   if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
 }
 
+// 条数选择器与服务端生效值对齐；config 手写了非 10/20/50 的值就动态补一个 option。
+function syncLimitSelect(limit) {
+  const sel = $("limit");
+  if (![...sel.options].some((o) => Number(o.value) === limit)) {
+    const o = document.createElement("option");
+    o.value = String(limit); o.textContent = "近 " + limit + " 条";
+    sel.appendChild(o);
+  }
+  sel.value = String(limit);
+}
+
 async function loadSessions() {
-  const r = await fetch("/api/sessions"); const { sessions } = await r.json();
+  const r = await fetch("/api/sessions"); const { sessions, limit } = await r.json();
   fillOptions(sessions, null);
+  syncLimitSelect(limit);
   const sel = $("sess");
   const pick = sessions.find((s) => s.id.startsWith(DEFAULT)) || sessions[0];
   if (pick) { sel.value = pick.id; await loadSession(pick.id); }
@@ -154,12 +171,22 @@ async function loadSessions() {
 // 静默刷新下拉标题/排序，保持当前选中与预览不动。5s 节流，防止频繁切窗口反复全量扫标题。
 let lastListRefresh = 0;
 async function refreshSessions() {
-  if (!detail) return;
-  const r = await fetch("/api/sessions?ensure=" + encodeURIComponent(detail.id));
+  const q = detail ? "?ensure=" + encodeURIComponent(detail.id) : "";
+  const r = await fetch("/api/sessions" + q);
   if (!r.ok) return;
-  const { sessions } = await r.json();
-  fillOptions(sessions, detail.id);
+  const data = await r.json();
+  fillOptions(data.sessions, detail ? detail.id : null);
+  syncLimitSelect(data.limit);
 }
+// 页面上改条数 = 写回 ~/.airgap/config.json（与配置文件同一真源），成功后按新条数重拉列表。
+$("limit").onchange = async () => {
+  const n = Number($("limit").value);
+  const r = await fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionListLimit: n }) });
+  const res = await r.json().catch(() => ({ ok: false, message: "保存失败" }));
+  if (!res.ok) { setStatus(res.message || "保存失败", true); return; }
+  setStatus("会话列表条数已设为 " + res.limit + "（已写入 ~/.airgap/config.json）。");
+  await refreshSessions();
+};
 window.addEventListener("focus", () => {
   if (Date.now() - lastListRefresh < 5000) return;
   lastListRefresh = Date.now();

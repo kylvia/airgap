@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -44,4 +44,31 @@ export async function loadConfig(home: string = os.homedir()): Promise<AirgapCon
 
 export function sessionListLimit(cfg: AirgapConfig): number {
   return cfg.share?.sessionListLimit ?? DEFAULT_SESSION_LIST_LIMIT;
+}
+
+/**
+ * 读-改-写 share.sessionListLimit（share UI 的条数选择器走这里持久化）：
+ * 只动这一个键，文件里的其他键（含未知键）原样保留；目录不存在则创建。
+ * 文件存在但解析不了时**拒绝覆盖**（宁可保存失败，不销毁用户手写的配置）。
+ */
+export async function updateSessionListLimit(limit: number, home: string = os.homedir()): Promise<number> {
+  const clamped = clampLimit(limit);
+  if (clamped === undefined) throw new Error(`sessionListLimit 需要整数，收到：${String(limit)}`);
+  const dir = path.join(home, ".airgap");
+  const file = path.join(dir, "config.json");
+  let raw: Record<string, unknown> = {};
+  try {
+    const parsed = asRecord(JSON.parse(await readFile(file, "utf8")));
+    if (!parsed) throw new Error("top-level not an object");
+    raw = parsed;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error("~/.airgap/config.json 已存在但无法解析；为避免覆盖你的内容未保存，请手动修复后重试");
+    }
+  }
+  const share = asRecord(raw["share"]) ?? {};
+  raw["share"] = { ...share, sessionListLimit: clamped };
+  await mkdir(dir, { recursive: true });
+  await writeFile(file, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+  return clamped;
 }

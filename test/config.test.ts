@@ -1,8 +1,8 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_SESSION_LIST_LIMIT, loadConfig, sessionListLimit } from "../src/config.js";
+import { DEFAULT_SESSION_LIST_LIMIT, loadConfig, sessionListLimit, updateSessionListLimit } from "../src/config.js";
 
 let tmpHome: string | null = null;
 
@@ -51,5 +51,35 @@ describe("loadConfig (~/.airgap/config.json)", () => {
   it("未知键忽略，不污染已知配置", async () => {
     const cfg = await loadConfig(await homeWith('{"share":{"sessionListLimit":10,"bogus":1},"future":{}}'));
     expect(cfg).toEqual({ share: { sessionListLimit: 10 } });
+  });
+});
+
+describe("updateSessionListLimit (share UI 条数选择器的持久化)", () => {
+  it("目录/文件不存在时创建并写入，返回 clamp 后的值", async () => {
+    const home = await homeWith(null);
+    expect(await updateSessionListLimit(20, home)).toBe(20);
+    expect(sessionListLimit(await loadConfig(home))).toBe(20);
+  });
+
+  it("只动 share.sessionListLimit，文件里的未知键原样保留", async () => {
+    const home = await homeWith('{"future":{"x":1},"share":{"sessionListLimit":50,"other":"keep"}}');
+    await updateSessionListLimit(10, home);
+    const raw = JSON.parse(
+      await readFile(path.join(home, ".airgap", "config.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(raw["future"]).toEqual({ x: 1 });
+    expect(raw["share"]).toEqual({ sessionListLimit: 10, other: "keep" });
+  });
+
+  it("config.json 存在但损坏 → 拒绝覆盖并抛错，原文件内容不动", async () => {
+    const home = await homeWith("{ broken");
+    await expect(updateSessionListLimit(10, home)).rejects.toThrow(/无法解析/);
+    expect(await readFile(path.join(home, ".airgap", "config.json"), "utf8")).toBe("{ broken");
+  });
+
+  it("非整数入参抛错；越界整数 clamp 后写入", async () => {
+    const home = await homeWith(null);
+    await expect(updateSessionListLimit(10.5, home)).rejects.toThrow(/整数/);
+    expect(await updateSessionListLimit(500, home)).toBe(200);
   });
 });

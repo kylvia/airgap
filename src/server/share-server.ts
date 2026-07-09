@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import type { RuleMatch, SessionInfo, ToolDisplay, Turn } from "../types.js";
 import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "../types.js";
-import { loadConfig, sessionListLimit } from "../config.js";
+import { loadConfig, sessionListLimit, updateSessionListLimit } from "../config.js";
 import { discoverSessions } from "../discovery.js";
 import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
@@ -274,7 +274,8 @@ export interface ShareServer {
 }
 
 export async function startShareServer(opts: { port?: number; defaultSession?: string }): Promise<ShareServer> {
-  const listLimit = sessionListLimit(await loadConfig()); // 启动时读一次；改 ~/.airgap/config.json 后重启生效
+  // 启动时读 config；页面上的条数选择器经 POST /api/config 持久化并即时更新这里
+  let listLimit = sessionListLimit(await loadConfig());
   let idleTimer: NodeJS.Timeout;
   const touch = (): void => {
     clearTimeout(idleTimer);
@@ -307,7 +308,22 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
     if (req.method === "GET" && p === "/api/sessions") {
       // ?ensure=<id>：前端焦点刷新时保证「当前正在看的会话」始终在列表里（可能比 limit 老）
       const ensure = url.searchParams.get("ensure") ?? opts.defaultSession;
-      sendJson(res, 200, { sessions: await listSessions(listLimit, ensure ?? undefined) });
+      sendJson(res, 200, { sessions: await listSessions(listLimit, ensure ?? undefined), limit: listLimit });
+      return;
+    }
+    if (req.method === "POST" && p === "/api/config") {
+      const body = JSON.parse(await readBody(req)) as { sessionListLimit?: unknown };
+      const n = body.sessionListLimit;
+      if (typeof n !== "number" || !Number.isInteger(n)) {
+        sendJson(res, 400, { ok: false, message: "sessionListLimit 需要整数" });
+        return;
+      }
+      try {
+        listLimit = await updateSessionListLimit(n);
+        sendJson(res, 200, { ok: true, limit: listLimit });
+      } catch (err) {
+        sendJson(res, 500, { ok: false, message: err instanceof Error ? err.message : String(err) });
+      }
       return;
     }
     if (req.method === "GET" && p.startsWith("/api/session/")) {
