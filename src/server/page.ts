@@ -220,12 +220,14 @@ async function loadSession(id, keepSelection) {
       for (const t of detail.turns) if (!t.tag) selected.add(t.index);
     }
     renderList(); buildPreviewShell();
-    // 会话 id 胶囊：显示前 8 位，点击复制完整 resume 命令（claude/codex 命令不同）
+    // 会话 id 胶囊：显示前 8 位，点击复制完整 resume 命令。
+    // 不回到原 workspace 的 resume 只有对话没有文件语境，基本没意义——cwd 已知就拼上 cd。
     const sid = $("sid");
     sid.textContent = detail.id.slice(0, 8);
     sid.style.display = "";
     sid.onclick = async () => {
-      const cmd = (detail.source === "codex" ? "codex resume " : "claude --resume ") + detail.id;
+      const resume = (detail.source === "codex" ? "codex resume " : "claude --resume ") + detail.id;
+      const cmd = detail.cwd ? 'cd "' + detail.cwd + '" && ' + resume : resume;
       try { await navigator.clipboard.writeText(cmd); setStatus("已复制：" + cmd); }
       catch { setStatus(cmd); } // 剪贴板不可用就把命令亮在状态栏，手动抄
     };
