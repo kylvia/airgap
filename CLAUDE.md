@@ -34,7 +34,7 @@ Read it before touching `slice.ts`, `redact.ts`, `ccpack.ts`, `open.ts`, or the 
 
 One extraction/detection core, multiple exits:
 
-- `src/config.ts` — reads `~/.airgap/config.json` (fail-soft: missing file / broken JSON / invalid fields silently fall back to defaults, never throws). Currently only `share.sessionListLimit` — session-dropdown cap, common values 10/20/50, clamped to [1,200], default 50, read once at share-server start.
+- `src/config.ts` — reads `~/.airgap/config.json` (fail-soft: missing file / broken JSON / invalid fields silently fall back to defaults, never throws). Currently only `share.sessionListLimit` — session-dropdown cap, common values 10/20/50, clamped to [1,200], default 20; read at share-server start and updatable in-page via POST /api/config.
 - `src/discovery.ts` — finds sessions in both sources; `mungeCwd` maps a cwd to Claude's project-dir name (`/` and `.` → `-`).
 - `src/detect/` — `rules.ts` (rule table + `PREFILTER` fast regex), `scanner.ts` (`scanString` pure function; `scanSessionFile` streams lines, prefilters, JSON-parses, walks only string *values* via `walkStrings` skipping metadata keys like `uuid`/`signature`).
 - `src/slice.ts` — extracts a coherent sub-tree of a session per the closure rules.

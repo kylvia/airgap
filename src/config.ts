@@ -13,7 +13,7 @@ export interface AirgapConfig {
   };
 }
 
-export const DEFAULT_SESSION_LIST_LIMIT = 50;
+export const DEFAULT_SESSION_LIST_LIMIT = 20;
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
