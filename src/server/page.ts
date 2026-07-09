@@ -64,6 +64,10 @@ ${THEME_CSS}
   footer button.primary:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); }
   footer .rdct { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); cursor: pointer; user-select: none; white-space: nowrap; }
   footer .rdct input { accent-color: var(--fg); cursor: pointer; }
+  footer select { height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-input);
+    background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: 13px; cursor: pointer; }
+  footer select:hover { border-color: var(--border-strong); }
+  footer select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   footer .status { flex: 1; font-size: 13px; color: var(--fg-muted); min-width: 200px; }
   footer .status.err { color: var(--danger); }
   .sbanner { background: var(--warning-bg); color: var(--warning-fg); font-size: 12.5px; padding: 8px 18px; border-bottom: 1px solid var(--warning); display: none; align-items: center; gap: 7px; }
@@ -87,6 +91,11 @@ ${THEME_CSS}
     <div class="right"><iframe id="preview"></iframe></div>
   </main>
   <footer>
+    <label class="rdct" title="工具调用的展示密度：隐藏 / 一行摘要 / 完整卡片（预览与导出一致）">工具<select id="tools">
+      <option value="none">隐藏</option>
+      <option value="summary" selected>摘要</option>
+      <option value="full">完整</option>
+    </select></label>
     <label class="rdct" title="导出前把检测到的密钥替换成占位符（推荐默认开）"><input type="checkbox" id="redact" checked>脱敏后导出</label>
     <button class="primary" data-a="clipboard" data-f="png">复制长图</button>
     <button data-a="download" data-f="png">下载 PNG</button>
@@ -128,16 +137,20 @@ function rel(ms) {
   if (d < 86400) return Math.floor(d / 3600) + "小时前"; return Math.floor(d / 86400) + "天前";
 }
 
-async function loadSession(id) {
+async function loadSession(id, keepSelection) {
   setStatus("加载中…");
-  const r = await fetch("/api/session/" + encodeURIComponent(id));
+  const r = await fetch("/api/session/" + encodeURIComponent(id) + "?tools=" + encodeURIComponent($("tools").value));
   if (!r.ok) { setStatus("加载失败", true); return; }
   detail = await r.json();
-  selected.clear();
-  // 默认勾选真实用户轮（跳过任务通知/命令/系统噪声），用户可再调
-  for (const t of detail.turns) if (!t.tag) selected.add(t.index);
+  if (!keepSelection) {
+    selected.clear();
+    // 默认勾选真实用户轮（跳过任务通知/命令/系统噪声），用户可再调
+    for (const t of detail.turns) if (!t.tag) selected.add(t.index);
+  }
   renderList(); buildPreviewShell();
-  setStatus("共 " + detail.turns.length + " 轮，已默认勾选 " + selected.size + " 轮真实对话。");
+  setStatus(keepSelection
+    ? "已按新的工具展示级别刷新预览。"
+    : "共 " + detail.turns.length + " 轮，已默认勾选 " + selected.size + " 轮真实对话。");
 }
 
 function renderList() {
@@ -213,7 +226,7 @@ async function doExport(action, format, acceptRisk) {
   const accept = !!acceptRisk || risky.length > 0;
   const turns = [...selected].sort((a, b) => a - b);
   setStatus(redact ? "脱敏处理中…" : "处理中…");
-  const body = JSON.stringify({ sessionId: detail.id, turns, format, action, redact, acceptRisk: accept });
+  const body = JSON.stringify({ sessionId: detail.id, turns, format, action, redact, acceptRisk: accept, tools: $("tools").value });
   const r = await fetch("/api/export", { method: "POST", headers: { "content-type": "application/json" }, body });
   if (action === "download" && r.ok && r.headers.get("content-type") === "image/png") {
     const blob = await r.blob(); const url = URL.createObjectURL(blob);
@@ -235,6 +248,8 @@ for (const btn of document.querySelectorAll("footer button[data-a]")) {
 }
 $("all").onclick = () => { for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
 $("none").onclick = () => { selected.clear(); renderList(); updateCount(); syncPreview(null); };
+// 切换工具展示级别：服务端按新级别重渲各轮片段（预览=导出，物理裁剪而非 CSS 隐藏），保留已勾选轮次。
+$("tools").onchange = () => { if (detail) loadSession(detail.id, true); };
 $("done").onclick = async () => { await fetch("/api/close", { method: "POST" }); setStatus("已关闭，可以关掉这个标签页了。"); };
 
 loadSessions();

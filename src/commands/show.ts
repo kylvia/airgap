@@ -3,7 +3,8 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Turn } from "../types.js";
+import type { ToolDisplay, Turn } from "../types.js";
+import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "../types.js";
 import { discoverSessions } from "../discovery.js";
 import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
@@ -23,6 +24,7 @@ interface ShowOpts {
   out?: string;
   yes?: boolean;
   redact?: boolean;
+  tools?: string;
 }
 
 // ---------- PNG：驱动系统 Chrome，零 npm 依赖 ----------
@@ -51,9 +53,18 @@ export function registerShow(program: Command): void {
     .option("--html", "output a single-file HTML (default)")
     .option("--png", "output a long-image PNG (requires a local Chrome)")
     .option("--out <file>", "output file path")
+    .option("--tools <level>", `tool-call display: none | summary | full (default: ${DEFAULT_TOOL_DISPLAY})`)
     .option("--redact", "redact detected secrets (placeholders) before exporting, instead of blocking")
     .option("--yes", "skip the secret-hit confirmation")
     .action(async (opts: ShowOpts) => {
+      // 0. 校验工具展示级别（渲染时生效；扫描/脱敏始终覆盖全部字段，从宽拦截）
+      if (opts.tools !== undefined && !(TOOL_DISPLAYS as readonly string[]).includes(opts.tools)) {
+        console.error(pc.red(`--tools 只接受 ${TOOL_DISPLAYS.join(" | ")}，收到：${opts.tools}`));
+        process.exitCode = 1;
+        return;
+      }
+      const toolDisplay: ToolDisplay = (opts.tools as ToolDisplay | undefined) ?? DEFAULT_TOOL_DISPLAY;
+
       // 1. 选会话：--session 前缀优先，否则 cwd 对应项目里最近的，再否则全局最近的
       const sessions = await discoverSessions({});
       const info = pickSession(sessions, opts);
@@ -160,9 +171,9 @@ export function registerShow(program: Command): void {
       const outFile = path.resolve(opts.out ?? `airgap-show-${info.id.slice(0, 8)}.${format}`);
 
       if (format === "md") {
-        await writeFile(outFile, renderMarkdown(selected, meta), "utf8");
+        await writeFile(outFile, renderMarkdown(selected, meta, { tools: toolDisplay }), "utf8");
       } else {
-        const html = renderHtml(selected, meta);
+        const html = renderHtml(selected, meta, { tools: toolDisplay });
         if (format === "html") {
           await writeFile(outFile, html, "utf8");
         } else {

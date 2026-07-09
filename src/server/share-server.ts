@@ -4,7 +4,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import type { RuleMatch, SessionInfo, Turn } from "../types.js";
+import type { RuleMatch, SessionInfo, ToolDisplay, Turn } from "../types.js";
+import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "../types.js";
 import { discoverSessions } from "../discovery.js";
 import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
@@ -53,6 +54,13 @@ interface ExportBody {
   redact?: boolean;
   /** caller has seen the findings and explicitly accepts exporting them un-redacted */
   acceptRisk?: boolean;
+  /** tool-call display level; invalid/absent values fall back to the default */
+  tools?: string;
+}
+
+/** 宽松解析工具展示级别：非法/缺省一律回落默认，绝不因 UI 参数报错。 */
+function parseToolDisplay(v: unknown): ToolDisplay {
+  return typeof v === "string" && (TOOL_DISPLAYS as readonly string[]).includes(v) ? (v as ToolDisplay) : DEFAULT_TOOL_DISPLAY;
 }
 
 // ---------- 会话读取 ----------
@@ -75,7 +83,7 @@ async function findSession(id: string): Promise<SessionInfo | null> {
   return sessions.find((s) => s.id === id) ?? pickSession(sessions, { session: id });
 }
 
-async function loadDetail(id: string): Promise<SessionDetail | null> {
+async function loadDetail(id: string, tools: ToolDisplay): Promise<SessionDetail | null> {
   const info = await findSession(id);
   if (!info) return null;
   const records = await readRecords(info.file);
@@ -87,7 +95,8 @@ async function loadDetail(id: string): Promise<SessionDetail | null> {
     index: t.index,
     preview: oneLine(t.userText).slice(0, 60),
     tag: turnTag(t.userText),
-    html: renderTurnBlock(t),
+    html: renderTurnBlock(t, { tools }),
+    // findings 始终扫全部字段（含 summary/none 下不渲染的 tool i/o）——从宽标记，与导出闸一致
     findings: scanOneTurn(t, scanString).length,
   }));
   return { id: info.id, title, date, turns: turnData };
@@ -160,10 +169,10 @@ export function exportBlockReason(
   return `选中内容含 ${findings.length} 处疑似密钥（${brief}${findings.length > 5 ? " 等" : ""}）；确认无误可接受风险重新导出，或先用 airgap pack 走 redact。`;
 }
 
-async function renderPng(turns: Turn[], title: string, date: string): Promise<string> {
+async function renderPng(turns: Turn[], title: string, date: string, tools: ToolDisplay): Promise<string> {
   const chrome = findChrome();
   if (!chrome) throw new Error("没找到本机 Chrome/Chromium（出图需要它）。可设 CHROME_PATH，或改用「存桌面」的 HTML/Markdown。");
-  const html = renderHtml(turns, { title, date });
+  const html = renderHtml(turns, { title, date }, { tools });
   // 无空格英文临时名，避开 osascript 路径转义坑
   const pngPath = path.join(os.tmpdir(), `airgap-share-${randomUUID()}.png`);
   await renderPngViaChrome(html, pngPath, chrome);
@@ -174,6 +183,7 @@ async function handleExport(body: ExportBody): Promise<ExportResult> {
   const sel = await selectedTurns(body.sessionId, body.turns);
   if (!sel || sel.turns.length === 0) return { ok: false, message: "没有选中任何轮次" };
   const { turns: rawTurns, title, date } = sel;
+  const tools = parseToolDisplay(body.tools);
 
   // 脱敏后导出（UI 默认）：占位符替换，fail-closed 保证干净，无需再拦截。
   // 否则真正渲染前二次复扫——前端 confirm 可被绕过，服务端才是最后一道闸。
@@ -196,19 +206,19 @@ async function handleExport(body: ExportBody): Promise<ExportResult> {
     await mkdir(desktop, { recursive: true });
     const outPath = path.join(desktop, `airgap-share-${stamp()}.${body.format}`);
     if (body.format === "png") {
-      const png = await renderPng(turns, title, date);
+      const png = await renderPng(turns, title, date, tools);
       await writeFile(outPath, await readFile(png));
     } else if (body.format === "html") {
-      await writeFile(outPath, renderHtml(turns, { title, date }), "utf8");
+      await writeFile(outPath, renderHtml(turns, { title, date }, { tools }), "utf8");
     } else {
-      await writeFile(outPath, renderMarkdown(turns, { title, date }), "utf8");
+      await writeFile(outPath, renderMarkdown(turns, { title, date }, { tools }), "utf8");
     }
     return { ok: true, message: `已存到 ${outPath}${redactNote}` };
   }
 
   // 浏览器下载：回 PNG 字节
   if (body.action === "download") {
-    const png = await renderPng(turns, title, date);
+    const png = await renderPng(turns, title, date, tools);
     return { ok: true, message: "download", bytes: await readFile(png), filename: `airgap-share-${stamp()}.png` };
   }
 
@@ -216,10 +226,10 @@ async function handleExport(body: ExportBody): Promise<ExportResult> {
   if (body.action === "clipboard") {
     if (!isMac) return { ok: false, message: "复制到剪贴板目前仅 macOS 支持，请改用「下载」或「存桌面」。" };
     if (body.format === "md") {
-      await run("pbcopy", [], renderMarkdown(turns, { title, date }));
+      await run("pbcopy", [], renderMarkdown(turns, { title, date }, { tools }));
       return { ok: true, message: `Markdown 已复制到剪贴板${redactNote}，去微信/公众号 Cmd-V 粘贴。` };
     }
-    const png = await renderPng(turns, title, date);
+    const png = await renderPng(turns, title, date, tools);
     await pngToClipboard(png);
     return { ok: true, message: `长图已复制到剪贴板${redactNote}，切到微信选好聊天，Cmd-V 粘贴发送。` };
   }
@@ -288,7 +298,7 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
     }
     if (req.method === "GET" && p.startsWith("/api/session/")) {
       const id = decodeURIComponent(p.slice("/api/session/".length));
-      const detail = await loadDetail(id);
+      const detail = await loadDetail(id, parseToolDisplay(url.searchParams.get("tools")));
       if (!detail) {
         sendJson(res, 404, { message: "找不到该会话" });
         return;

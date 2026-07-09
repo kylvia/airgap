@@ -1,7 +1,13 @@
-import type { Turn, TurnBlock } from "../types.js";
+import type { ToolDisplay, Turn, TurnBlock } from "../types.js";
+import { DEFAULT_TOOL_DISPLAY } from "../types.js";
 import MarkdownIt from "markdown-it";
 import { tasklist } from "@mdit/plugin-tasklist";
 import { THEME_CSS } from "./theme.js";
+
+export interface RenderOptions {
+  /** how tool calls appear; defaults to DEFAULT_TOOL_DISPLAY ("summary") */
+  tools?: ToolDisplay;
+}
 
 export function escapeHtml(s: string): string {
   return s
@@ -157,10 +163,20 @@ export const CHAT_CSS = `${THEME_CSS}
     white-space: pre-wrap; margin-top: 8px; color: var(--fg-muted);
     border-left: 2px solid var(--border-strong); padding-left: 12px;
   }
+  /* summary 一行：hairline 轻量行，无卡片框 —— 工具叙事的默认密度 */
+  .msg-ai .toolline {
+    display: flex; align-items: baseline; gap: 9px; margin: 0 0 9px;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+    color: var(--fg-subtle); overflow-wrap: anywhere;
+  }
+  .msg-ai .toolline .tool-name { font-weight: 600; color: var(--fg); flex-shrink: 0; font-size: 12px; }
+  .msg-ai .toolline .tool-status { margin-left: 0; flex-shrink: 0; }
   .msg-ai .toolcard {
     border: 1px solid var(--border); border-radius: var(--radius-input);
     background: var(--bg); margin: 0 0 11px; overflow: hidden;
   }
+  .msg-ai .toolcard .tool-file { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted); }
+  .msg-ai .toolcard-in .cmd-prompt { color: var(--fg-subtle); }
   .msg-ai .toolcard-err { border-color: var(--danger); }
   .msg-ai .toolcard-head {
     display: flex; align-items: center; gap: 8px; padding: 8px 12px;
@@ -200,26 +216,95 @@ function thinkingMark(): string {
   return `<svg class="tmark" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1.6" y="2.6" width="12.8" height="8.8" rx="2" stroke="currentColor" stroke-width="1.3"/><circle cx="5.2" cy="7" r="0.95" fill="currentColor"/><circle cx="8" cy="7" r="0.95" fill="currentColor"/><circle cx="10.8" cy="7" r="0.95" fill="currentColor"/></svg>`;
 }
 
-/** 单张工具卡：头部（工具名 + 完成/报错状态）+ 完整输入 + 结果摘要，展示 AI 的一步操作。 */
-function renderToolCard(block: TurnBlock): string {
-  const name = escapeHtml(block.toolName ?? "tool");
-  const input = block.toolInput ? escapeHtml(block.toolInput) : "";
-  const result = block.toolResult ?? "";
+/**
+ * 工具类别 → 差异化渲染策略：
+ * run（执行）= 终端样式 `$ command`；search（检索）= 任何级别都只渲染一行，
+ * input/result 对读者是纯噪声；edit（写改）= 头部突出文件名；other = 通用卡。
+ * codex 的 shell 类 function_call.arguments 是 JSON 字符串、拿不到干净命令文本，暂归 other。
+ */
+type ToolKind = "run" | "search" | "edit" | "other";
+const TOOL_KIND_TABLE: Record<string, ToolKind> = {
+  Bash: "run",
+  Read: "search",
+  Grep: "search",
+  Glob: "search",
+  LS: "search",
+  WebFetch: "search",
+  WebSearch: "search",
+  ToolSearch: "search",
+  NotebookRead: "search",
+  web_search: "search",
+  Edit: "edit",
+  Write: "edit",
+  MultiEdit: "edit",
+  NotebookEdit: "edit",
+};
+function toolKind(name: string | undefined): ToolKind {
+  return (name && TOOL_KIND_TABLE[name]) || "other";
+}
+
+/** block.text 是 turns.ts 生成的 `Name: brief`；剥掉前缀取 brief，格式不符就原样返回。 */
+function toolBrief(block: TurnBlock): string {
+  const prefix = `${block.toolName ?? "tool"}: `;
+  return block.text.startsWith(prefix) ? block.text.slice(prefix.length) : block.text;
+}
+
+function toolStatus(block: TurnBlock, withLabel: boolean): string {
   const isError = block.toolError === true;
-  const status =
-    result || isError
-      ? `<span class="tool-status ${isError ? "err" : "ok"}">${isError ? "✗ 失败" : "✓ 完成"}</span>`
-      : "";
+  if (!block.toolResult && !isError) return "";
+  const mark = isError ? (withLabel ? "✗ 失败" : "✗") : withLabel ? "✓ 完成" : "✓";
+  return `<span class="tool-status ${isError ? "err" : "ok"}">${mark}</span>`;
+}
+
+/** summary 一行：工具名 + 主参数摘要 + 状态。检索类在 full 级别也走这条。 */
+function renderToolLine(block: TurnBlock): string {
+  const name = escapeHtml(block.toolName ?? "tool");
+  const brief = escapeHtml(toolBrief(block));
+  return `<div class="toolline"><span class="tool-name">${name}</span><span class="tool-brief">${brief}</span>${toolStatus(block, false)}</div>`;
+}
+
+/** 文件路径 → basename（兼容 / 与 \），供写改类头部突出文件名。 */
+function fileBasename(p: string | undefined): string | null {
+  if (!p) return null;
+  return p.split(/[\\/]/).pop() || null;
+}
+
+/** 单张工具卡：头部（工具名 + 写改类的文件名 + 完成/报错状态）+ 输入 + 结果摘要。 */
+function renderToolCard(block: TurnBlock, kind: ToolKind): string {
+  const name = escapeHtml(block.toolName ?? "tool");
+  const isError = block.toolError === true;
+  const result = block.toolResult ?? "";
+
+  const base = kind === "edit" ? fileBasename(block.toolPrimary) : null;
+  const fileTag = base ? `<span class="tool-file">${escapeHtml(base)}</span>` : "";
+
+  // run 类：只展示命令本身（description 等参数是给 AI 看的），带 $ 提示符
+  const input =
+    kind === "run" && block.toolPrimary
+      ? `<span class="cmd-prompt">$ </span>${escapeHtml(block.toolPrimary)}`
+      : block.toolInput
+        ? escapeHtml(block.toolInput)
+        : "";
+
   const out: string[] = [`<div class="toolcard${isError ? " toolcard-err" : ""}">`];
-  out.push(`<div class="toolcard-head"><span class="tool-name">${name}</span>${status}</div>`);
+  out.push(`<div class="toolcard-head"><span class="tool-name">${name}</span>${fileTag}${toolStatus(block, true)}</div>`);
   if (input) out.push(`<div class="toolcard-in">${input}</div>`);
   if (result) out.push(`<div class="toolcard-out">${escapeHtml(result).replace(/\n/g, "<br>")}</div>`);
   out.push("</div>");
   return out.join("");
 }
 
-/** 单轮聊天片段：轮次标记 + 用户纸条 + AI 纸面卡片。每个工具调用渲染成一张工具卡。供预览面板逐轮拼装复用。 */
-export function renderTurnBlock(turn: Turn): string {
+/** 按展示级别分发：none 完全不渲染（导出物里物理不存在，不是 CSS 藏起来）。 */
+function renderToolBlock(block: TurnBlock, tools: ToolDisplay): string {
+  if (tools === "none") return "";
+  const kind = toolKind(block.toolName);
+  if (tools === "summary" || kind === "search") return renderToolLine(block);
+  return renderToolCard(block, kind);
+}
+
+/** 单轮聊天片段：轮次标记 + 用户纸条 + AI 纸面卡片。工具块按 opts.tools 级别渲染。供预览面板逐轮拼装复用。 */
+export function renderTurnBlock(turn: Turn, opts?: RenderOptions): string {
+  const tools = opts?.tools ?? DEFAULT_TOOL_DISPLAY;
   const out: string[] = [];
   out.push(`  <div class="turn-label">—— 第 ${turn.index} 轮 ——</div>`);
   out.push(
@@ -234,7 +319,8 @@ export function renderTurnBlock(turn: Turn): string {
         `<details class="thinking"><summary>${thinkingMark()}<span>思考过程</span></summary><div class="thinking-body">${escapeHtml(block.text)}</div></details>`,
       );
     } else {
-      inner.push(renderToolCard(block));
+      const rendered = renderToolBlock(block, tools);
+      if (rendered) inner.push(rendered);
     }
   }
   if (inner.length > 0) {
@@ -244,14 +330,14 @@ export function renderTurnBlock(turn: Turn): string {
 }
 
 /** 单文件 Dossier 风聊天 HTML：warm bone 纸面 + paper 卡片 + off-black/pastel 点缀，深色跟随系统（PNG 截图恒为浅色）。 */
-export function renderHtml(turns: Turn[], meta: { title: string; date: string }): string {
+export function renderHtml(turns: Turn[], meta: { title: string; date: string }, opts?: RenderOptions): string {
   const body: string[] = [];
   body.push('  <div class="header">');
   body.push(`    <div class="title">${airgapMark(24)}<span>${escapeHtml(meta.title)}</span></div>`);
   body.push(`    <div>${escapeHtml(meta.date)} · 共 ${turns.length} 轮</div>`);
   body.push("  </div>");
   for (const turn of turns) {
-    body.push(renderTurnBlock(turn));
+    body.push(renderTurnBlock(turn, opts));
   }
   body.push(`  <div class="footer">${airgapMark(13)}<span>导出自本地会话 · Generated by airgap</span></div>`);
 

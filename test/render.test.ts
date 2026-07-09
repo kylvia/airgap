@@ -13,9 +13,10 @@ const turns: Turn[] = [
       { kind: "thinking", text: "先判断是不是 XSS 演示。" },
       {
         kind: "tool",
-        text: 'Bash: {"command":"grep -r alert src"}',
+        text: "Bash: grep -r alert src",
         toolName: "Bash",
-        toolInput: "grep -r alert src",
+        toolInput: "command: grep -r alert src\ndescription: 找 alert 调用",
+        toolPrimary: "grep -r alert src",
         toolResult: "src/x.ts: 1 处匹配",
       },
       {
@@ -67,7 +68,15 @@ describe("renderMarkdown", () => {
     expect(md).toContain("## 结论");
     expect(md).toContain("- **第二点**");
     expect(md).toContain("> 💭 先判断是不是 XSS 演示。");
-    expect(md).toContain('- 🔧 `Bash: {"command":"grep -r alert src"}`');
+    expect(md).toContain("- 🔧 `Bash: grep -r alert src`");
+  });
+
+  it("tools=none 时工具行整体省略，文本/思考不受影响", () => {
+    const none = renderMarkdown(turns, meta, { tools: "none" });
+    expect(none).not.toContain("🔧");
+    expect(none).not.toContain("grep -r alert src");
+    expect(none).toContain("> 💭 先判断是不是 XSS 演示。");
+    expect(none).toContain("## 结论");
   });
 });
 
@@ -104,14 +113,17 @@ describe("renderHtml", () => {
     expect(html).toContain("多行<br>用户输入");
   });
 
-  it("thinking 折叠进 details，工具渲染成带输入/结果的执行卡", () => {
+  it("thinking 折叠进 details，工具默认渲染成一行摘要（summary 档）", () => {
     expect(html).toContain('<details class="thinking">');
     expect(html).toContain("先判断是不是 XSS 演示。");
-    expect(html).toContain('<div class="toolcard">');
+    expect(html).toContain('<div class="toolline">');
     expect(html).toContain('<span class="tool-name">Bash</span>');
-    expect(html).toContain('<span class="tool-status ok">✓ 完成</span>');
-    expect(html).toContain('<div class="toolcard-in">grep -r alert src</div>');
-    expect(html).toContain('<div class="toolcard-out">src/x.ts: 1 处匹配</div>');
+    expect(html).toContain('<span class="tool-brief">grep -r alert src</span>');
+    expect(html).toContain('<span class="tool-status ok">✓</span>');
+    // summary 档不出现完整卡：结构化 input（含 description 噪声）与结果区都不进导出物
+    expect(html).not.toContain('<div class="toolcard');
+    expect(html).not.toContain("找 alert 调用");
+    expect(html).not.toContain("src/x.ts: 1 处匹配");
   });
 
   it("AI 文本走 markdown-it：标题/列表/粗体/行内码/链接/代码块", () => {
@@ -129,6 +141,91 @@ describe("renderHtml", () => {
   it("没有 assistant 块的轮不渲染空白 AI 卡片", () => {
     const tail = html.slice(html.indexOf("—— 第 2 轮 ——"));
     expect(tail).not.toContain('class="msg-ai"');
+  });
+});
+
+describe("工具展示三档与按工具类型的差异化渲染", () => {
+  const toolTurns: Turn[] = [
+    {
+      index: 1,
+      userText: "测试各类工具",
+      assistant: [
+        {
+          kind: "tool",
+          text: "Bash: npm test",
+          toolName: "Bash",
+          toolInput: "command: npm test\ndescription: 跑测试",
+          toolPrimary: "npm test",
+          toolResult: "146 passed",
+        },
+        {
+          kind: "tool",
+          text: "Read: /repo/src/scanner.ts",
+          toolName: "Read",
+          toolInput: "/repo/src/scanner.ts",
+          toolPrimary: "/repo/src/scanner.ts",
+          toolResult: "120 行",
+        },
+        {
+          kind: "tool",
+          text: "Edit: /repo/src/rules.ts",
+          toolName: "Edit",
+          toolInput: "file_path: /repo/src/rules.ts\nold_string: a\nnew_string: b",
+          toolPrimary: "/repo/src/rules.ts",
+          toolResult: "ok",
+        },
+        {
+          kind: "tool",
+          text: "mcp__db__query: select 1",
+          toolName: "mcp__db__query",
+          toolInput: "select 1",
+          toolPrimary: "select 1",
+          toolError: true,
+        },
+        { kind: "text", text: "跑完了。" },
+      ],
+      timestamp: null,
+    },
+  ];
+
+  it("full：执行类渲成 $ 命令终端卡，参数噪声（description）不进导出物", () => {
+    const full = renderHtml(toolTurns, meta, { tools: "full" });
+    expect(full).toContain('<span class="cmd-prompt">$ </span>npm test');
+    expect(full).toContain('<div class="toolcard-out">146 passed</div>');
+    expect(full).not.toContain("跑测试");
+  });
+
+  it("full：检索类仍强制一行，不出 input/result 卡", () => {
+    const full = renderHtml(toolTurns, meta, { tools: "full" });
+    expect(full).toContain('<span class="tool-name">Read</span><span class="tool-brief">/repo/src/scanner.ts</span>');
+    expect(full).not.toContain('<div class="toolcard-out">120 行</div>');
+  });
+
+  it("full：写改类头部突出文件名 basename；未知工具走通用卡；错误卡带 err 态", () => {
+    const full = renderHtml(toolTurns, meta, { tools: "full" });
+    expect(full).toContain('<span class="tool-file">rules.ts</span>');
+    expect(full).toContain('<div class="toolcard-in">select 1</div>');
+    expect(full).toContain('class="toolcard toolcard-err"');
+    expect(full).toContain('<span class="tool-status err">✗ 失败</span>');
+  });
+
+  it("summary（默认档）：全部工具一行摘要，显式传参与缺省一致", () => {
+    const byDefault = renderHtml(toolTurns, meta);
+    const explicit = renderHtml(toolTurns, meta, { tools: "summary" });
+    expect(byDefault).toBe(explicit);
+    expect(byDefault).toContain('<span class="tool-name">Bash</span><span class="tool-brief">npm test</span>');
+    expect(byDefault).toContain('<span class="tool-status err">✗</span>');
+    expect(byDefault).not.toContain('<div class="toolcard');
+  });
+
+  it("none：工具痕迹在导出物里物理不存在（不是 CSS 藏起来），文本正常保留", () => {
+    const none = renderHtml(toolTurns, meta, { tools: "none" });
+    expect(none).not.toContain('<div class="toolline"');
+    expect(none).not.toContain('<div class="toolcard');
+    expect(none).not.toContain("npm test");
+    expect(none).not.toContain("scanner.ts");
+    expect(none).not.toContain("select 1");
+    expect(none).toContain("跑完了。");
   });
 });
 

@@ -138,6 +138,16 @@ export interface PackManifest {
 
 // ---------- rendering (show) ----------
 
+/**
+ * How tool calls appear in an export:
+ * none = pure dialogue, tool blocks omitted entirely (also stripped from the exported markup);
+ * summary = one line per tool (name + primary-arg brief + status);
+ * full = complete card with structured input and result excerpt.
+ */
+export type ToolDisplay = "none" | "summary" | "full";
+export const TOOL_DISPLAYS: readonly ToolDisplay[] = ["none", "summary", "full"];
+export const DEFAULT_TOOL_DISPLAY: ToolDisplay = "summary";
+
 export interface TurnBlock {
   kind: "text" | "thinking" | "tool";
   /** text/thinking body; for tool blocks: one-line summary "ToolName: brief" (fallback + markdown) */
@@ -146,6 +156,8 @@ export interface TurnBlock {
   toolName?: string;
   /** tool blocks only: full structured input (command / file path / params), may be multi-line, capped */
   toolInput?: string;
+  /** tool blocks only: untruncated primary-arg value (e.g. Bash command / Edit file_path), capped like toolInput; feeds kind-specific rendering */
+  toolPrimary?: string;
   /** tool blocks only: execution result summary (first lines, truncated) */
   toolResult?: string;
   /** tool blocks only: the result was an error */

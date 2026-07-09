@@ -1,4 +1,5 @@
-import type { Turn } from "../types.js";
+import type { ToolDisplay, Turn } from "../types.js";
+import { DEFAULT_TOOL_DISPLAY } from "../types.js";
 
 function blockquote(s: string): string {
   return s
@@ -10,8 +11,14 @@ function blockquote(s: string): string {
 /**
  * 干净 markdown 输出：AI 文本原样保留（本身就是 markdown），
  * 用户文本用 blockquote 区隔，thinking 折叠进 blockquote，工具行折叠成列表项。
+ * opts.tools=none 时工具行整体省略；markdown 出口本来就是一行摘要形态，full 与 summary 等价。
  */
-export function renderMarkdown(turns: Turn[], meta: { title: string; date: string }): string {
+export function renderMarkdown(
+  turns: Turn[],
+  meta: { title: string; date: string },
+  opts?: { tools?: ToolDisplay },
+): string {
+  const tools = opts?.tools ?? DEFAULT_TOOL_DISPLAY;
   const out: string[] = [];
   out.push(`# ${meta.title}`);
   out.push("");
@@ -33,6 +40,7 @@ export function renderMarkdown(turns: Turn[], meta: { title: string; date: strin
         } else if (block.kind === "thinking") {
           out.push(blockquote(`💭 ${block.text.trim()}`));
         } else {
+          if (tools === "none") continue;
           out.push(`- 🔧 \`${block.text.replace(/`/g, "'")}\``);
         }
         out.push("");

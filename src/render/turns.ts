@@ -16,6 +16,7 @@ const TOOL_RESULT_MAX = 400;
 const TOOL_PRIMARY_FIELDS = [
   "command",
   "file_path",
+  "notebook_path",
   "path",
   "pattern",
   "query",
@@ -36,26 +37,34 @@ function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
+/**
+ * 主参数完整值（截断到 TOOL_INPUT_MAX）：字符串 input 本身，或对象里按
+ * TOOL_PRIMARY_FIELDS 优先级取第一个字符串值。没有明确主参数时返回 undefined
+ * （摘要有自己的兜底链，但那不算"主参数"）。喂给渲染层做按工具类型的差异化。
+ */
+function primaryValue(input: unknown): string | undefined {
+  if (typeof input === "string") {
+    const s = input.trim();
+    return s.length > 0 ? truncate(s, TOOL_INPUT_MAX) : undefined;
+  }
+  const obj = asRecord(input);
+  if (!obj) return undefined;
+  for (const key of TOOL_PRIMARY_FIELDS) {
+    const v = obj[key];
+    if (typeof v === "string" && v.trim()) return truncate(v.trim(), TOOL_INPUT_MAX);
+  }
+  return undefined;
+}
+
 /** `工具名: 主参数摘要（≤80 字符）` */
 function toolSummary(name: string, input: unknown): string {
-  let brief = "";
-  if (typeof input === "string") {
-    brief = input;
-  } else if (input && typeof input === "object" && !Array.isArray(input)) {
+  let brief = primaryValue(input) ?? "";
+  if (!brief && input && typeof input === "object" && !Array.isArray(input)) {
     const obj = input as Record<string, unknown>;
-    for (const key of TOOL_PRIMARY_FIELDS) {
-      const v = obj[key];
+    for (const v of Object.values(obj)) {
       if (typeof v === "string" && v.trim()) {
         brief = v;
         break;
-      }
-    }
-    if (!brief) {
-      for (const v of Object.values(obj)) {
-        if (typeof v === "string" && v.trim()) {
-          brief = v;
-          break;
-        }
       }
     }
     if (!brief) {
@@ -233,6 +242,7 @@ function pushClaudeAssistantBlocks(
         text: toolSummary(name, b["input"]),
         toolName: name,
         toolInput: structuredInput(b["input"]),
+        toolPrimary: primaryValue(b["input"]),
       };
       turn.assistant.push(tb);
       const id = b["id"];
@@ -359,6 +369,7 @@ function extractCodexTurns(records: JsonlRecord[]): Turn[] {
         text: toolSummary(name, input),
         toolName: name,
         toolInput: structuredInput(input),
+        toolPrimary: primaryValue(input),
       };
       current.assistant.push(tb);
       const callId = payload["call_id"];
@@ -399,6 +410,7 @@ function extractCodexTurns(records: JsonlRecord[]): Turn[] {
         text: toolSummary("web_search", brief),
         toolName: "web_search",
         toolInput: structuredInput(brief),
+        toolPrimary: primaryValue(brief),
       });
     }
     // function_call_output / custom_tool_call_output 等跳过
