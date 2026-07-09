@@ -16,7 +16,8 @@ import { oneLine, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns,
 import { renderPage } from "./page.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
-const MAX_LIST = 15;
+/** 下拉只放最近 N 个（全量几百项难翻）；更早的用 `airgap share --session <前缀>` 直开。 */
+const MAX_LIST = 50;
 
 // ---------- API 数据形态 ----------
 
@@ -65,17 +66,21 @@ function parseToolDisplay(v: unknown): ToolDisplay {
 
 // ---------- 会话读取 ----------
 
-async function listSessions(): Promise<SessionSummary[]> {
+async function listSessions(ensureId?: string): Promise<SessionSummary[]> {
   const sessions = await discoverSessions({});
-  return [...sessions]
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .slice(0, MAX_LIST)
-    .map((s) => ({
-      id: s.id,
-      project: s.cwd ? path.basename(s.cwd) : s.project,
-      source: s.source,
-      mtimeMs: s.mtimeMs,
-    }));
+  const sorted = [...sessions].sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const top = sorted.slice(0, MAX_LIST);
+  // --session 指定的会话若比 MAX_LIST 还老，补进列表尾——否则前端下拉里没有它，预选会静默落空。
+  if (ensureId && !top.some((s) => s.id === ensureId)) {
+    const hit = sorted.find((s) => s.id === ensureId);
+    if (hit) top.push(hit);
+  }
+  return top.map((s) => ({
+    id: s.id,
+    project: s.cwd ? path.basename(s.cwd) : s.project,
+    source: s.source,
+    mtimeMs: s.mtimeMs,
+  }));
 }
 
 async function findSession(id: string): Promise<SessionInfo | null> {
@@ -293,7 +298,7 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
       return;
     }
     if (req.method === "GET" && p === "/api/sessions") {
-      sendJson(res, 200, { sessions: await listSessions() });
+      sendJson(res, 200, { sessions: await listSessions(opts.defaultSession) });
       return;
     }
     if (req.method === "GET" && p.startsWith("/api/session/")) {
