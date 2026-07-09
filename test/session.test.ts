@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RuleMatch, SessionInfo, Turn } from "../src/types.js";
-import { pickSession, scanOneTurn, scanTurns, turnTag } from "../src/session.js";
+import { pickSession, redactTurns, scanOneTurn, scanTurns, turnTag } from "../src/session.js";
 
 describe("turnTag", () => {
   it("flags non-question user turns", () => {
@@ -32,6 +32,67 @@ describe("scanTurns / scanOneTurn", () => {
     expect(scanTurns(turns, scan)).toHaveLength(1); // deduped across user+assistant
     expect(scanOneTurn(turns[1]!, scan)).toHaveLength(1);
     expect(scanOneTurn(turns[0]!, scan)).toHaveLength(0);
+  });
+
+  it("scans a secret hiding only in a tool result (the `cat .env` leak)", () => {
+    // summary + user text are clean; the secret lives only in toolResult, which IS rendered.
+    const t: Turn = {
+      index: 1,
+      userText: "cat 一下 .env 看看",
+      assistant: [
+        { kind: "tool", text: "Bash: cat .env", toolName: "Bash", toolInput: "cat .env", toolResult: "AWS_SECRET=sk-ant-LEAK" },
+      ],
+      timestamp: null,
+    };
+    expect(scanTurns([t], scan)).toHaveLength(1);
+  });
+
+  it("scans a secret in a tool input (e.g. a Write body)", () => {
+    const t: Turn = {
+      index: 1,
+      userText: "写个配置文件",
+      assistant: [
+        { kind: "tool", text: "Write: config.ts", toolName: "Write", toolInput: "const KEY = 'sk-ant-LEAK'", toolResult: "ok" },
+      ],
+      timestamp: null,
+    };
+    expect(scanTurns([t], scan)).toHaveLength(1);
+  });
+});
+
+describe("redactTurns", () => {
+  it("replaces a secret in a tool result, reports the count, and leaves the input turns untouched", () => {
+    const t: Turn = {
+      index: 1,
+      userText: "cat .env",
+      timestamp: null,
+      assistant: [
+        { kind: "tool", text: "Bash: cat .env", toolName: "Bash", toolInput: "cat .env", toolResult: "K=sk-ant-LEAK" },
+      ],
+    };
+    const { turns, count } = redactTurns([t], scan);
+    expect(count).toBe(1);
+    const block = turns[0]!.assistant[0]!;
+    expect(block.toolResult).not.toContain("sk-ant-LEAK");
+    expect(block.toolResult).toMatch(/REDACTED/);
+    // input untouched (fresh copy), and the redacted output scans clean
+    expect(t.assistant[0]!.toolResult).toBe("K=sk-ant-LEAK");
+    expect(scanTurns(turns, scan)).toHaveLength(0);
+  });
+
+  it("uses one consistent placeholder for the same secret across fields", () => {
+    const t: Turn = {
+      index: 1,
+      userText: "key sk-ant-LEAK",
+      timestamp: null,
+      assistant: [{ kind: "tool", text: "Bash: run", toolName: "Bash", toolInput: "echo sk-ant-LEAK", toolResult: "sk-ant-LEAK" }],
+    };
+    const { turns, count } = redactTurns([t], scan);
+    expect(count).toBe(1); // one distinct secret
+    const out = turns[0]!;
+    const placeholder = out.userText.replace("key ", "");
+    expect(out.assistant[0]!.toolInput).toBe(`echo ${placeholder}`);
+    expect(out.assistant[0]!.toolResult).toBe(placeholder);
   });
 });
 

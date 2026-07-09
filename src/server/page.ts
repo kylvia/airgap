@@ -62,6 +62,8 @@ ${THEME_CSS}
   footer button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   footer button.primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-bg); color: var(--btn-primary-fg); }
   footer button.primary:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); }
+  footer .rdct { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); cursor: pointer; user-select: none; white-space: nowrap; }
+  footer .rdct input { accent-color: var(--fg); cursor: pointer; }
   footer .status { flex: 1; font-size: 13px; color: var(--fg-muted); min-width: 200px; }
   footer .status.err { color: var(--danger); }
   .sbanner { background: var(--warning-bg); color: var(--warning-fg); font-size: 12.5px; padding: 8px 18px; border-bottom: 1px solid var(--warning); display: none; align-items: center; gap: 7px; }
@@ -85,11 +87,12 @@ ${THEME_CSS}
     <div class="right"><iframe id="preview"></iframe></div>
   </main>
   <footer>
+    <label class="rdct" title="导出前把检测到的密钥替换成占位符（推荐默认开）"><input type="checkbox" id="redact" checked>脱敏后导出</label>
     <button class="primary" data-a="clipboard" data-f="png">复制长图</button>
     <button data-a="download" data-f="png">下载 PNG</button>
     <button data-a="clipboard" data-f="md">复制 Markdown</button>
     <button data-a="save" data-f="png">存桌面</button>
-    <span class="status" id="status">勾选左侧轮次，右侧实时预览，点「复制长图」→ 切微信 Cmd-V 粘贴发送。</span>
+    <span class="status" id="status">默认「脱敏后导出」。勾选轮次 → 右侧预览 → 点「复制长图」→ 切微信 Cmd-V 粘贴。</span>
     <button id="done">完成关闭</button>
   </footer>
 <script>
@@ -158,7 +161,7 @@ function updateCount() {
   $("count").textContent = "已选 " + selected.size;
   const risky = detail.turns.filter((t) => selected.has(t.index) && t.findings > 0);
   const b = $("sbanner");
-  if (risky.length) { b.style.display = "flex"; b.innerHTML = WARN_MARK + "<span>选中的第 " + risky.map((t) => t.index).join("、") + " 轮含疑似密钥，导出/发送前请确认无误。</span>"; }
+  if (risky.length) { b.style.display = "flex"; b.innerHTML = WARN_MARK + "<span>选中的第 " + risky.map((t) => t.index).join("、") + " 轮含疑似密钥；默认「脱敏后导出」会替换成占位符，取消勾选则原样导出。</span>"; }
   else b.style.display = "none";
 }
 
@@ -200,21 +203,31 @@ function syncPreview(scrollTo) {
 
 function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
-async function doExport(action, format) {
+async function doExport(action, format, acceptRisk) {
   if (!detail || selected.size === 0) { setStatus("先勾选至少一轮", true); return; }
+  const redact = $("redact").checked;
   const risky = detail.turns.filter((t) => selected.has(t.index) && t.findings > 0);
-  if (risky.length && !confirm("选中的第 " + risky.map((t) => t.index).join("、") + " 轮含疑似密钥，确定仍要导出/发送吗？")) return;
+  // 脱敏后导出是安全的，无需确认；仅「原样导出且命中」时才二次确认。
+  if (!redact && risky.length && !acceptRisk && !confirm("选中的第 " + risky.map((t) => t.index).join("、") + " 轮含疑似密钥，未脱敏原样导出，确定吗？")) return;
+  // 前端确认通过（或显式重试）即声明接受风险；服务端仍独立复扫兜底。
+  const accept = !!acceptRisk || risky.length > 0;
   const turns = [...selected].sort((a, b) => a - b);
-  setStatus("处理中…");
-  const body = JSON.stringify({ sessionId: detail.id, turns, format, action });
+  setStatus(redact ? "脱敏处理中…" : "处理中…");
+  const body = JSON.stringify({ sessionId: detail.id, turns, format, action, redact, acceptRisk: accept });
   const r = await fetch("/api/export", { method: "POST", headers: { "content-type": "application/json" }, body });
   if (action === "download" && r.ok && r.headers.get("content-type") === "image/png") {
     const blob = await r.blob(); const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = "airgap-share.png";
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    setStatus("PNG 已下载。"); return;
+    setStatus(redact ? "PNG 已下载（已脱敏密钥）。" : "PNG 已下载。"); return;
   }
-  const res = await r.json(); setStatus(res.message, !res.ok);
+  const res = await r.json();
+  // 服务端拦截（原样导出且命中，或有人绕过 UI）：确认后带 acceptRisk 重试一次。
+  if (r.status === 409 && res.blocked) {
+    if (confirm(res.message + "\\n仍要原样导出吗？")) return doExport(action, format, true);
+    setStatus("已取消导出。", true); return;
+  }
+  setStatus(res.message, !res.ok);
 }
 
 for (const btn of document.querySelectorAll("footer button[data-a]")) {

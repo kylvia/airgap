@@ -4,14 +4,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import type { SessionInfo, Turn } from "../types.js";
+import type { RuleMatch, SessionInfo, Turn } from "../types.js";
 import { discoverSessions } from "../discovery.js";
 import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
 import { renderHtml, renderTurnBlock } from "../render/html.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
-import { oneLine, pickSession, readRecords, scanOneTurn, sessionTitle, turnTag } from "../session.js";
+import { oneLine, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../session.js";
 import { renderPage } from "./page.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
@@ -49,6 +49,10 @@ interface ExportBody {
   turns: number[];
   format: ExportFormat;
   action: ExportAction;
+  /** redact detected secrets (placeholders) before rendering — the safe default in the UI */
+  redact?: boolean;
+  /** caller has seen the findings and explicitly accepts exporting them un-redacted */
+  acceptRisk?: boolean;
 }
 
 // ---------- 会话读取 ----------
@@ -129,9 +133,31 @@ async function pngToClipboard(pngPath: string): Promise<void> {
 interface ExportResult {
   ok: boolean;
   message: string;
+  /** 服务端扫描拦下（含密钥且未 acceptRisk）：HTTP 层回 409，前端可确认后带 acceptRisk 重试 */
+  blocked?: boolean;
   /** download 时的 PNG 字节 */
   bytes?: Buffer;
   filename?: string;
+}
+
+/**
+ * 服务端导出前的二次拦截：前端 confirm 可被绕过（或有人直接打 /api/export），所以在真正
+ * 渲染导出前再扫一遍选中轮次的可见内容（含 tool input/result）。命中且调用方未显式
+ * acceptRisk 时返回一句拒绝理由；否则返回 null 放行。scan 可注入，默认用真实 scanString。
+ */
+export function exportBlockReason(
+  turns: Turn[],
+  acceptRisk: boolean | undefined,
+  scan: (s: string) => RuleMatch[] = scanString,
+): string | null {
+  if (acceptRisk) return null;
+  const findings = scanTurns(turns, scan);
+  if (findings.length === 0) return null;
+  const brief = findings
+    .slice(0, 5)
+    .map((f) => `${f.ruleId} ${f.preview}`)
+    .join("、");
+  return `选中内容含 ${findings.length} 处疑似密钥（${brief}${findings.length > 5 ? " 等" : ""}）；确认无误可接受风险重新导出，或先用 airgap pack 走 redact。`;
 }
 
 async function renderPng(turns: Turn[], title: string, date: string): Promise<string> {
@@ -147,7 +173,21 @@ async function renderPng(turns: Turn[], title: string, date: string): Promise<st
 async function handleExport(body: ExportBody): Promise<ExportResult> {
   const sel = await selectedTurns(body.sessionId, body.turns);
   if (!sel || sel.turns.length === 0) return { ok: false, message: "没有选中任何轮次" };
-  const { turns, title, date } = sel;
+  const { turns: rawTurns, title, date } = sel;
+
+  // 脱敏后导出（UI 默认）：占位符替换，fail-closed 保证干净，无需再拦截。
+  // 否则真正渲染前二次复扫——前端 confirm 可被绕过，服务端才是最后一道闸。
+  let turns = rawTurns;
+  let redactNote = "";
+  if (body.redact) {
+    const red = redactTurns(rawTurns, scanString);
+    turns = red.turns;
+    if (red.count > 0) redactNote = `（已脱敏 ${red.count} 处疑似密钥）`;
+  } else {
+    const blockReason = exportBlockReason(rawTurns, body.acceptRisk);
+    if (blockReason) return { ok: false, blocked: true, message: blockReason };
+  }
+
   const isMac = process.platform === "darwin";
 
   // 存桌面：png / html / md 三格式
@@ -163,7 +203,7 @@ async function handleExport(body: ExportBody): Promise<ExportResult> {
     } else {
       await writeFile(outPath, renderMarkdown(turns, { title, date }), "utf8");
     }
-    return { ok: true, message: `已存到 ${outPath}` };
+    return { ok: true, message: `已存到 ${outPath}${redactNote}` };
   }
 
   // 浏览器下载：回 PNG 字节
@@ -177,11 +217,11 @@ async function handleExport(body: ExportBody): Promise<ExportResult> {
     if (!isMac) return { ok: false, message: "复制到剪贴板目前仅 macOS 支持，请改用「下载」或「存桌面」。" };
     if (body.format === "md") {
       await run("pbcopy", [], renderMarkdown(turns, { title, date }));
-      return { ok: true, message: "Markdown 已复制到剪贴板，去微信/公众号 Cmd-V 粘贴。" };
+      return { ok: true, message: `Markdown 已复制到剪贴板${redactNote}，去微信/公众号 Cmd-V 粘贴。` };
     }
     const png = await renderPng(turns, title, date);
     await pngToClipboard(png);
-    return { ok: true, message: "长图已复制到剪贴板，切到微信选好聊天，Cmd-V 粘贴发送。" };
+    return { ok: true, message: `长图已复制到剪贴板${redactNote}，切到微信选好聊天，Cmd-V 粘贴发送。` };
   }
 
   return { ok: false, message: "未知操作" };
@@ -268,7 +308,8 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
         res.end(result.bytes);
         return;
       }
-      sendJson(res, result.ok ? 200 : 400, { ok: result.ok, message: result.message });
+      const status = result.ok ? 200 : result.blocked ? 409 : 400;
+      sendJson(res, status, { ok: result.ok, blocked: result.blocked, message: result.message });
       return;
     }
     if (req.method === "POST" && p === "/api/close") {

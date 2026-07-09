@@ -10,7 +10,7 @@ import { extractTurns } from "../render/turns.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { renderHtml } from "../render/html.js";
 import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
-import { oneLine, pickSession, readRecords, scanTurns, sessionTitle } from "../session.js";
+import { oneLine, pickSession, readRecords, redactTurns, scanTurns, sessionTitle } from "../session.js";
 
 interface ShowOpts {
   last?: string;
@@ -22,6 +22,7 @@ interface ShowOpts {
   png?: boolean;
   out?: string;
   yes?: boolean;
+  redact?: boolean;
 }
 
 // ---------- PNG：驱动系统 Chrome，零 npm 依赖 ----------
@@ -50,6 +51,7 @@ export function registerShow(program: Command): void {
     .option("--html", "output a single-file HTML (default)")
     .option("--png", "output a long-image PNG (requires a local Chrome)")
     .option("--out <file>", "output file path")
+    .option("--redact", "redact detected secrets (placeholders) before exporting, instead of blocking")
     .option("--yes", "skip the secret-hit confirmation")
     .action(async (opts: ShowOpts) => {
       // 1. 选会话：--session 前缀优先，否则 cwd 对应项目里最近的，再否则全局最近的
@@ -115,24 +117,35 @@ export function registerShow(program: Command): void {
         selected = turns;
       }
 
-      // 4. 出图前扫描：有命中先列出，--yes 才跳过确认
-      const findings = scanTurns(selected, scanString);
-      if (findings.length > 0) {
-        console.error(pc.yellow(`⚠ 选中内容里发现 ${findings.length} 处疑似密钥/敏感信息：`));
-        for (const f of findings) {
-          console.error(`  ${pc.red(f.severity.padEnd(8))} ${f.ruleId}  ${f.preview}`);
+      // 4. 出图前处理密钥：--redact 脱敏后导出（推荐）；否则命中就拦截，--yes 才跳过确认
+      let redactedCount = 0;
+      if (opts.redact) {
+        // 脱敏（占位符）后再导出：结果由 redactor 的 fail-closed 复扫保证干净
+        const before = scanTurns(selected, scanString).length;
+        if (before > 0) {
+          const red = redactTurns(selected, scanString);
+          selected = red.turns;
+          redactedCount = red.count;
         }
-        if (!opts.yes) {
-          if (!process.stdin.isTTY) {
-            console.error(pc.red("非交互环境无法确认。确认要带着这些内容出图请加 --yes。"));
-            process.exitCode = 1;
-            return;
+      } else {
+        const findings = scanTurns(selected, scanString);
+        if (findings.length > 0) {
+          console.error(pc.yellow(`⚠ 选中内容里发现 ${findings.length} 处疑似密钥/敏感信息：`));
+          for (const f of findings) {
+            console.error(`  ${pc.red(f.severity.padEnd(8))} ${f.ruleId}  ${f.preview}`);
           }
-          const go = await p.confirm({ message: "仍要继续出图吗？（建议先 airgap pack 走 redact）", initialValue: false });
-          if (p.isCancel(go) || !go) {
-            p.cancel("已取消");
-            process.exitCode = 1;
-            return;
+          if (!opts.yes) {
+            if (!process.stdin.isTTY) {
+              console.error(pc.red("非交互环境无法确认。用 --redact 脱敏后导出，或用 --yes 确认原样出图。"));
+              process.exitCode = 1;
+              return;
+            }
+            const go = await p.confirm({ message: "仍要原样出图吗？（推荐改用 --redact 脱敏后导出）", initialValue: false });
+            if (p.isCancel(go) || !go) {
+              p.cancel("已取消");
+              process.exitCode = 1;
+              return;
+            }
           }
         }
       }
@@ -163,5 +176,8 @@ export function registerShow(program: Command): void {
         }
       }
       console.log(`${pc.green("✔")} ${info.source} 会话 ${info.id.slice(0, 8)} · ${selected.length} 轮 → ${outFile}`);
+      if (redactedCount > 0) {
+        console.log(pc.dim(`  已脱敏 ${redactedCount} 处疑似密钥（占位符替换，原文未写入导出物）`));
+      }
     });
 }
