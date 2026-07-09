@@ -1,4 +1,6 @@
 import type { Turn, TurnBlock } from "../types.js";
+import MarkdownIt from "markdown-it";
+import { tasklist } from "@mdit/plugin-tasklist";
 import { THEME_CSS } from "./theme.js";
 
 export function escapeHtml(s: string): string {
@@ -10,98 +12,53 @@ export function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** 行内格式：先转义，再依次处理行内码（占位保护）、粗体、链接。 */
-function inline(raw: string): string {
-  let s = escapeHtml(raw);
-  const codeSpans: string[] = [];
-  s = s.replace(/`([^`]+)`/g, (_m, code: string) => {
-    codeSpans.push(`<code>${code}</code>`);
-    return `\u0000${codeSpans.length - 1}\u0000`;
-  });
-  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>');
-  s = s.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => codeSpans[Number(i)] ?? "");
-  return s;
-}
+/**
+ * markdown-it 单例：渲染的是**不可信**的会话内容，默认 XSS-safe。
+ * - html:false —— 源码里的 raw HTML 当文本转义，绝不渲染成活动标签。**永远不要改成 true。**
+ * - 默认 validateLink 丢弃 javascript:/vbscript:/file:/非图 data: 协议。**永远不要覆写 md.validateLink。**
+ * - linkify:false —— 只认显式 [text](url)，不把裸 URL 自动成链（保持旧手写版行为）。
+ * - breaks:true —— 段内单换行 → <br>，对齐旧手写版逐行 <br>。
+ * - image 覆写 —— 只放行 data:image/ 内联图，丢弃一切远程 src，保证导出物零外链。
+ * - heading 降级 —— # → h2 … 封顶 h4（h1 留给文档标题 .header .title；复刻旧排版）。
+ * GFM 表格/删除线/blockquote/嵌套/斜体/hr 内置；任务列表由 @mdit/plugin-tasklist 提供。
+ */
+const md = new MarkdownIt({ html: false, linkify: false, breaks: true }).use(tasklist, {
+  disabled: true,
+  label: false,
+});
+
+// 零外链红线：远程 markdown 图片默认会生成 <img src=远程>，这里只放行 data:image/，其余丢标签留转义后的 alt 文本。
+const defaultImageRule = md.renderer.rules.image;
+md.renderer.rules.image = (tokens, idx, options, env, self) => {
+  const token = tokens[idx];
+  const src = token?.attrGet("src") ?? "";
+  if (!/^data:image\//i.test(src)) return md.utils.escapeHtml(token?.content ?? "");
+  return defaultImageRule
+    ? defaultImageRule(tokens, idx, options, env, self)
+    : self.renderToken(tokens, idx, options);
+};
+
+// 标题降级：markdown-it 的 # 输出 h1，逐轮卡片里改用 h2..h4（h1 归文档标题），复刻旧手写排版并复用现有 CSS。
+const shiftHeading: NonNullable<typeof md.renderer.rules.heading_open> = (
+  tokens,
+  idx,
+  options,
+  _env,
+  self,
+) => {
+  const token = tokens[idx];
+  if (token) token.tag = `h${Math.min(Number(token.tag.slice(1)) + 1, 4)}`; // h1→h2, h3→h4, h4+→h4
+  return self.renderToken(tokens, idx, options);
+};
+md.renderer.rules.heading_open = shiftHeading;
+md.renderer.rules.heading_close = shiftHeading;
 
 /**
- * 轻量 markdown→html：# 标题、**粗体**、- 列表、1. 有序列表、```代码块```、
- * `行内码`、[链接](url)。表格不支持。全部内容先 HTML 转义再套格式。
+ * markdown→html：委托给上面的 markdown-it 单例（同步、默认 XSS-safe，GFM 全覆盖）。
+ * 保持同步 export 签名不变，renderTurnBlock / share 预览透明复用。
  */
-export function markdownToHtml(md: string): string {
-  const out: string[] = [];
-  let inCode = false;
-  let codeLines: string[] = [];
-  let ulItems: string[] = [];
-  let olItems: string[] = [];
-  let para: string[] = [];
-
-  const flushPara = (): void => {
-    if (para.length > 0) {
-      out.push(`<p>${para.map(inline).join("<br>")}</p>`);
-      para = [];
-    }
-  };
-  const flushLists = (): void => {
-    if (ulItems.length > 0) {
-      out.push(`<ul>${ulItems.map((i) => `<li>${inline(i)}</li>`).join("")}</ul>`);
-      ulItems = [];
-    }
-    if (olItems.length > 0) {
-      out.push(`<ol>${olItems.map((i) => `<li>${inline(i)}</li>`).join("")}</ol>`);
-      olItems = [];
-    }
-  };
-  const flushCode = (): void => {
-    out.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
-    codeLines = [];
-    inCode = false;
-  };
-
-  for (const line of md.split(/\r?\n/)) {
-    if (inCode) {
-      if (/^\s*```/.test(line)) flushCode();
-      else codeLines.push(line);
-      continue;
-    }
-    if (/^\s*```/.test(line)) {
-      flushPara();
-      flushLists();
-      inCode = true;
-      continue;
-    }
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading) {
-      flushPara();
-      flushLists();
-      const level = Math.min((heading[1] ?? "#").length + 1, 4); // # → h2，## → h3，###+ → h4
-      out.push(`<h${level}>${inline(heading[2] ?? "")}</h${level}>`);
-      continue;
-    }
-    const ul = /^\s*[-*]\s+(.*)$/.exec(line);
-    if (ul) {
-      flushPara();
-      ulItems.push(ul[1] ?? "");
-      continue;
-    }
-    const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-    if (ol) {
-      flushPara();
-      olItems.push(ol[1] ?? "");
-      continue;
-    }
-    if (line.trim().length === 0) {
-      flushPara();
-      flushLists();
-      continue;
-    }
-    flushLists();
-    para.push(line);
-  }
-  if (inCode) flushCode(); // 未闭合代码块容错
-  flushPara();
-  flushLists();
-  return out.join("\n");
+export function markdownToHtml(src: string): string {
+  return md.render(src);
 }
 
 export const CHAT_CSS = `${THEME_CSS}
@@ -175,6 +132,31 @@ export const CHAT_CSS = `${THEME_CSS}
   .msg-ai a:focus-visible, .msg-ai details.thinking summary:focus-visible {
     outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-input);
   }
+  /* GFM elements (markdown-it): tables, blockquote, strikethrough, em, hr, task-list, nested lists, inline data-image. */
+  .msg-ai em { font-style: italic; }
+  .msg-ai del, .msg-ai s { text-decoration: line-through; color: var(--fg-muted); }
+  .msg-ai blockquote {
+    border-left: 2px solid var(--border-strong); padding-left: 12px;
+    margin: 0 0 13px; color: var(--fg-muted);
+  }
+  .msg-ai hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
+  .msg-ai table {
+    display: block; width: max-content; max-width: 100%; overflow-x: auto;
+    border-collapse: collapse; margin: 0 0 13px; font-size: 13.5px;
+  }
+  .msg-ai th, .msg-ai td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  .msg-ai thead th { background: var(--bg-hover); font-weight: 600; }
+  .msg-ai li > ul, .msg-ai li > ol { margin: 6px 0 0 1.1em; }
+  .msg-ai li.task-list-item { list-style: none; margin-left: -1.1em; }
+  .msg-ai input[type=checkbox] { accent-color: var(--accent); margin-right: 7px; vertical-align: middle; }
+  .msg-ai img { max-width: 100%; height: auto; border-radius: var(--radius-input); }
+  .msg-ai details.thinking { color: var(--fg-muted); font-size: 13px; margin: 0 0 11px; }
+  .msg-ai details.thinking summary { cursor: pointer; color: var(--fg-muted); font-family: var(--font-sans); font-size: 12.5px; display: inline-flex; align-items: center; gap: 7px; }
+  .msg-ai details.thinking summary .tmark { color: var(--accent); flex-shrink: 0; }
+  .msg-ai details.thinking .thinking-body {
+    white-space: pre-wrap; margin-top: 8px; color: var(--fg-muted);
+    border-left: 2px solid var(--border-strong); padding-left: 12px;
+  }
   .msg-ai .toolcard {
     border: 1px solid var(--border); border-radius: var(--radius-input);
     background: var(--bg); margin: 0 0 11px; overflow: hidden;
@@ -198,13 +180,6 @@ export const CHAT_CSS = `${THEME_CSS}
     padding: 9px 12px; border-top: 1px dashed var(--border);
     font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
     color: var(--fg-subtle); white-space: pre-wrap; word-break: break-word;
-  }
-  .msg-ai details.thinking { color: var(--fg-muted); font-size: 13px; margin: 0 0 11px; }
-  .msg-ai details.thinking summary { cursor: pointer; color: var(--fg-muted); font-family: var(--font-sans); font-size: 12.5px; display: inline-flex; align-items: center; gap: 7px; }
-  .msg-ai details.thinking summary .tmark { color: var(--accent); flex-shrink: 0; }
-  .msg-ai details.thinking .thinking-body {
-    white-space: pre-wrap; margin-top: 8px; color: var(--fg-muted);
-    border-left: 2px solid var(--border-strong); padding-left: 12px;
   }
   .footer {
     font-family: var(--font-sans);

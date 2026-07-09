@@ -114,14 +114,16 @@ describe("renderHtml", () => {
     expect(html).toContain('<div class="toolcard-out">src/x.ts: 1 处匹配</div>');
   });
 
-  it("AI 文本走轻量 markdown：标题/列表/粗体/行内码/链接/代码块", () => {
+  it("AI 文本走 markdown-it：标题/列表/粗体/行内码/链接/代码块", () => {
     expect(html).toContain("<h3>结论</h3>");
     expect(html).toContain("<li>第一点</li>");
     expect(html).toContain("<strong>第二点</strong>");
-    expect(html).toContain("<ol><li>有序一</li><li>有序二</li></ol>");
+    expect(html).toContain("<ol>");
+    expect(html).toContain("<li>有序一</li>");
     expect(html).toContain("<code>npm i</code>");
     expect(html).toContain('<a href="https://example.com/a?b=1&amp;c=2">官网</a>');
-    expect(html).toContain("<pre><code>const ok = 1 &lt; 2 &amp;&amp; &quot;a&quot; !== &#39;b&#39;;</code></pre>");
+    // 代码块：< 与 & 转义、不泄漏（单引号 markdown-it 不转义，不断言）
+    expect(html).toContain("const ok = 1 &lt; 2 &amp;&amp; &quot;a&quot;");
   });
 
   it("没有 assistant 块的轮不渲染空白 AI 卡片", () => {
@@ -130,22 +132,24 @@ describe("renderHtml", () => {
   });
 });
 
-describe("markdownToHtml 细节", () => {
+describe("markdownToHtml（markdown-it）细节", () => {
   it("先转义再套格式：粗体里的 HTML 被转义", () => {
-    expect(markdownToHtml("a **<b>** c")).toBe("<p>a <strong>&lt;b&gt;</strong> c</p>");
+    expect(markdownToHtml("a **<b>** c").trim()).toBe("<p>a <strong>&lt;b&gt;</strong> c</p>");
   });
 
   it("行内码内容不再被二次格式化", () => {
-    expect(markdownToHtml("`**not bold**`")).toBe("<p><code>**not bold**</code></p>");
+    expect(markdownToHtml("`**not bold**`").trim()).toBe("<p><code>**not bold**</code></p>");
   });
 
   it("未闭合代码块容错收尾", () => {
-    expect(markdownToHtml("```\nx = 1")).toBe("<pre><code>x = 1</code></pre>");
+    const html = markdownToHtml("```\nx = 1");
+    expect(html).toContain("<pre>");
+    expect(html).toContain("x = 1");
   });
 
-  it("# 一级标题映射到 h2，### 及以下封顶 h4", () => {
-    expect(markdownToHtml("# A")).toBe("<h2>A</h2>");
-    expect(markdownToHtml("#### B")).toBe("<h4>B</h4>");
+  it("# 一级标题降级到 h2，### 及以下封顶 h4", () => {
+    expect(markdownToHtml("# A").trim()).toBe("<h2>A</h2>");
+    expect(markdownToHtml("#### B").trim()).toBe("<h4>B</h4>");
   });
 
   it("非 http(s) 链接不转 a 标签", () => {
@@ -153,7 +157,64 @@ describe("markdownToHtml 细节", () => {
   });
 
   it("段内换行转 <br>，空行分段", () => {
-    expect(markdownToHtml("a\nb\n\nc")).toBe("<p>a<br>b</p>\n<p>c</p>");
+    const html = markdownToHtml("a\nb\n\nc");
+    expect(html).toContain("<br>");
+    expect(html).toContain("<p>a");
+    expect(html).toContain("b</p>");
+    expect(html).toContain("<p>c</p>");
+  });
+});
+
+describe("markdown-it 安全与零外链（渲染不可信会话内容）", () => {
+  it("raw HTML 被转义，不产生活动标签", () => {
+    const s = markdownToHtml("<script>alert(1)</script>");
+    expect(s).not.toContain("<script>");
+    expect(s).toContain("&lt;script&gt;");
+    expect(markdownToHtml("<img src=x onerror=alert(1)>")).not.toContain("<img");
+  });
+
+  it("危险协议链接被丢弃", () => {
+    expect(markdownToHtml("[c](javascript:alert(1))")).not.toContain("<a ");
+    expect(markdownToHtml("[c](vbscript:msgbox(1))")).not.toContain("<a ");
+    expect(markdownToHtml("[c](data:text/html,PHNjcmlwdD4=)")).not.toContain("<a ");
+  });
+
+  it("零外链：远程图被丢弃，仅内联 data:image 放行", () => {
+    const remote = markdownToHtml("![x](https://evil.example/x.png)");
+    expect(remote).not.toContain("<img");
+    expect(remote).not.toContain("evil.example");
+    const inline = markdownToHtml("![logo](data:image/png;base64,AAAA)");
+    expect(inline).toContain("<img");
+    expect(inline).toContain("data:image/png");
+  });
+});
+
+describe("markdown-it GFM 覆盖（手写版缺失的语法）", () => {
+  it("表格", () => {
+    const html = markdownToHtml("| A | B |\n| --- | --- |\n| 1 | 2 |");
+    expect(html).toContain("<table>");
+    expect(html).toContain("<th>A</th>");
+    expect(html).toContain("<td>1</td>");
+  });
+
+  it("删除线 / 斜体 / 引用 / 水平线", () => {
+    expect(markdownToHtml("~~x~~")).toContain("<s>x</s>");
+    expect(markdownToHtml("*x*")).toContain("<em>x</em>");
+    expect(markdownToHtml("> q")).toContain("<blockquote>");
+    expect(markdownToHtml("---")).toContain("<hr>");
+  });
+
+  it("任务列表渲染成 disabled checkbox", () => {
+    const html = markdownToHtml("- [ ] 待办\n- [x] 完成");
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain('checked="checked"');
+    expect(html).toContain("disabled");
+  });
+
+  it("嵌套列表", () => {
+    const html = markdownToHtml("- 顶层\n  - 嵌套");
+    expect(html).toContain("<li>顶层");
+    expect((html.match(/<ul>/g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
 });
 
