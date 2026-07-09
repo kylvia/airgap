@@ -8,6 +8,7 @@ import { THEME_CSS } from "../render/theme.js";
 export function renderPage(defaultSession?: string): string {
   const chatCss = JSON.stringify(CHAT_CSS);
   const def = JSON.stringify(defaultSession ?? "");
+  const warnMark = '<svg class="wicon" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2 15 14.2H1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.6v3.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.7" r="0.55" fill="currentColor"/></svg>';
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -42,13 +43,14 @@ ${THEME_CSS}
   }
   .row { display: flex; gap: 8px; padding: 10px 16px; align-items: flex-start; cursor: pointer; border-bottom: 1px solid var(--border-subtle); transition: background var(--dur-1) var(--ease); }
   .row:hover { background: var(--bg-hover); }
-  .row input { margin-top: 3px; accent-color: var(--color-ink); }
+  .row input { margin-top: 3px; accent-color: var(--fg); }
   .row .body { flex: 1; min-width: 0; }
   .row .top { font-size: 13px; }
   .row .idx { color: var(--fg-subtle); margin-right: 6px; }
   .row .prev { color: var(--fg); }
   .row .tag { font-size: 11px; color: var(--fg); background: var(--bg-muted); border: 1px solid var(--border); border-radius: var(--radius-tag); padding: 1px 9px; margin-left: 6px; }
-  .row .warn { font-size: 11px; color: var(--danger); margin-left: 6px; }
+  .row .warn { font-size: 11px; color: var(--danger); margin-left: 6px; display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; }
+  .wicon { flex-shrink: 0; }
   .right { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg-subtle); }
   .right iframe { flex: 1; border: 0; width: 100%; background: var(--bg-subtle); }
   footer { position: sticky; bottom: 0; z-index: 10; padding: 12px 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
@@ -56,12 +58,13 @@ ${THEME_CSS}
   footer button { height: 36px; padding: 0 20px; border: 1px solid var(--border-strong); border-radius: var(--radius-button);
     background: transparent; color: var(--fg); font-family: var(--font-sans); font-size: 13px; font-weight: 500; cursor: pointer; transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
   footer button:hover { background: var(--bg-hover); }
+  footer button:active { transform: scale(0.985); }
   footer button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   footer button.primary { background: var(--btn-primary-bg); border-color: var(--btn-primary-bg); color: var(--btn-primary-fg); }
   footer button.primary:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); }
   footer .status { flex: 1; font-size: 13px; color: var(--fg-muted); min-width: 200px; }
   footer .status.err { color: var(--danger); }
-  .sbanner { background: var(--warning-bg); color: var(--warning-fg); font-size: 12.5px; padding: 8px 18px; border-bottom: 1px solid var(--warning); display: none; }
+  .sbanner { background: var(--warning-bg); color: var(--warning-fg); font-size: 12.5px; padding: 8px 18px; border-bottom: 1px solid var(--warning); display: none; align-items: center; gap: 7px; }
 </style>
 </head>
 <body>
@@ -94,6 +97,7 @@ const CHAT_CSS = ${chatCss};
 const DEFAULT = ${def};
 const MARK_H = ${JSON.stringify(airgapMark(24))};   // 预览外壳 header/footer 的品牌 mark（与 renderHtml 一致）
 const MARK_F = ${JSON.stringify(airgapMark(13))};
+const WARN_MARK = ${JSON.stringify(warnMark)};
 let detail = null;            // 当前会话 {id,title,date,turns:[]}
 const selected = new Set();   // 选中的轮次 index
 let pvReady = false;          // 预览 iframe 是否已加载好
@@ -143,7 +147,7 @@ function renderList() {
     const top = document.createElement("div"); top.className = "top";
     top.innerHTML = '<span class="idx">第' + t.index + '轮</span><span class="prev"></span>'
       + (t.tag ? '<span class="tag">' + t.tag + '</span>' : '')
-      + (t.findings > 0 ? '<span class="warn">⚠含' + t.findings + '处疑似密钥</span>' : '');
+      + (t.findings > 0 ? '<span class="warn">' + WARN_MARK + '含' + t.findings + '处疑似密钥</span>' : '');
     top.querySelector(".prev").textContent = t.preview;
     body.appendChild(top); row.appendChild(cb); row.appendChild(body); list.appendChild(row);
   }
@@ -154,7 +158,7 @@ function updateCount() {
   $("count").textContent = "已选 " + selected.size;
   const risky = detail.turns.filter((t) => selected.has(t.index) && t.findings > 0);
   const b = $("sbanner");
-  if (risky.length) { b.style.display = "block"; b.textContent = "⚠ 选中的第 " + risky.map((t) => t.index).join("、") + " 轮含疑似密钥，导出/发送前请确认无误。"; }
+  if (risky.length) { b.style.display = "flex"; b.innerHTML = WARN_MARK + "<span>选中的第 " + risky.map((t) => t.index).join("、") + " 轮含疑似密钥，导出/发送前请确认无误。</span>"; }
   else b.style.display = "none";
 }
 

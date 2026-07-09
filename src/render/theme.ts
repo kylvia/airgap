@@ -1,94 +1,106 @@
 /**
- * Evergreen style tokens from Refero:
- * linen canvas + bone cards + ink actions + sage botanical accent.
+ * Dossier style tokens (minimalist-ui direction):
+ * warm bone canvas + paper-white cards + off-black actions + muted pastel spot accents.
  * Shared by exported transcript HTML and the local share UI.
  *
  * Rules:
  * - Concrete colors live here; render/page CSS should use var(--x).
- * - Sage is an accent wash, never a primary button fill.
- * - Cards are flat paper surfaces with hairline borders, no shadows.
- * - Dark mode is CSS-only via prefers-color-scheme.
+ * - Color is scarce: muted pastels carry semantic meaning (ok/err/warn/info), never decoration.
+ * - Cards are ultra-flat paper surfaces with hairline borders, no shadows.
+ * - Primary actions are off-black square buttons (6px), never pills.
+ * - Text is off-black, never pure #000. Dark mode is CSS-only via prefers-color-scheme.
  */
 export const THEME_CSS = `
   :root {
     color-scheme: light dark;
-    --font-serif: "Playfair Display", "DM Serif Display", Georgia, Cambria, "Times New Roman", "Songti SC", STSong, serif;
-    --font-sans: "Rubik", "DM Sans", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
-    --font-mono: "ABC Diatype Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "PingFang SC", "Microsoft YaHei", monospace;
+    --font-serif: "Newsreader", "Instrument Serif", "Lyon Text", "Playfair Display", Georgia, Cambria, "Songti SC", STSong, serif;
+    --font-sans: "SF Pro Display", "SF Pro Text", "Geist Sans", "Switzer", "Helvetica Neue", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Helvetica, Arial, sans-serif;
+    --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Monaco, Consolas, "PingFang SC", "Microsoft YaHei", monospace;
 
-    --radius-input: 7px;
+    --radius-input: 6px;
     --radius-card: 10px;
-    --radius-link: 30px;
-    --radius-button: 40.5px;
-    --radius-tag: 46px;
-    /* Compatibility aliases while remaining CSS migrates to Evergreen radius tokens. */
+    --radius-button: 6px;
+    --radius-tag: 9999px;
+    /* Compatibility aliases for CSS still referencing older radius names. */
     --radius-sm: var(--radius-input);
     --radius-md: var(--radius-card);
-    --radius-pill: var(--radius-button);
+    --radius-pill: var(--radius-tag);
     --shadow-card: none;
+    --shadow-hover: 0 2px 8px rgba(0,0,0,0.04);
 
-    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
     --dur-1: 120ms;
     --dur-2: 200ms;
 
-    --color-linen-canvas: #edede2;
-    --color-bone-card: #fffff3;
-    --color-pure-white: #ffffff;
-    --color-ink: #000000;
-    --color-charcoal: #333333;
-    --color-sage: #beedc0;
+    /* Warm monochrome core */
+    --color-bone: #fbfbfa;        /* page canvas */
+    --color-paper: #ffffff;       /* cards, panels, controls */
+    --color-cloud: #f7f6f3;       /* recessed surfaces: code, toolcard head, hover */
+    --color-off-black: #1a1a1a;   /* primary text + action fill (never pure #000) */
+    --color-charcoal: #2f3437;    /* secondary text */
+    --color-graphite: #787774;    /* muted metadata text */
 
-    --bg-subtle: var(--color-linen-canvas);
-    --bg: var(--color-bone-card);
-    --bg-hover: #f4f4e8;
-    --bg-active: #e5e5d8;
-    --bg-muted: rgba(190,237,192,0.32);
-    --border: rgba(0,0,0,0.18);
-    --border-strong: var(--color-ink);
-    --border-subtle: rgba(0,0,0,0.10);
-    --fg: var(--color-ink);
+    /* Muted pastel spot accents — semantic only */
+    --pastel-green-bg: #edf3ec;
+    --pastel-green-fg: #346538;
+    --pastel-red-bg: #fdebec;
+    --pastel-red-fg: #9f2f2d;
+    --pastel-yellow-bg: #fbf3db;
+    --pastel-yellow-fg: #956400;
+    --pastel-blue-bg: #e1f3fe;
+    --pastel-blue-fg: #1f6c9f;
+
+    --bg-subtle: var(--color-bone);
+    --bg: var(--color-paper);
+    --bg-hover: var(--color-cloud);
+    --bg-active: #efeee9;
+    --bg-muted: var(--pastel-green-bg);
+    --border: #eaeaea;
+    --border-strong: rgba(0,0,0,0.14);
+    --border-subtle: rgba(0,0,0,0.06);
+    --fg: var(--color-off-black);
     --fg-muted: var(--color-charcoal);
-    --fg-subtle: rgba(51,51,51,0.72);
-    --accent: var(--color-sage);
+    --fg-subtle: var(--color-graphite);
+    --accent: var(--pastel-green-fg);       /* ink-weight accent for small marks/dots */
+    --accent-wash: var(--pastel-green-bg);  /* faint fill for dots/tags */
 
-    --danger: #8f2f21;
-    --warning: #806416;
-    --warning-fg: #5e480f;
-    --warning-bg: rgba(128,100,22,0.12);
+    --danger: var(--pastel-red-fg);
+    --danger-bg: var(--pastel-red-bg);
+    --warning: var(--pastel-yellow-fg);
+    --warning-fg: var(--pastel-yellow-fg);
+    --warning-bg: var(--pastel-yellow-bg);
 
-    --btn-primary-bg: var(--color-ink);
-    --btn-primary-fg: var(--color-pure-white);
-    --btn-primary-hover: #222222;
-    --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--color-ink);
+    --btn-primary-bg: var(--color-off-black);
+    --btn-primary-fg: #ffffff;
+    --btn-primary-hover: #333333;
+    --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--color-off-black);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --color-linen-canvas: #171711;
-      --color-bone-card: #232318;
-      --color-pure-white: #fffdf0;
-      --color-ink: #f5f2df;
-      --color-charcoal: #cbc7ad;
-      --color-sage: #9edaa2;
+      --color-bone: #1b1b19;
+      --color-paper: #242422;
+      --color-cloud: #2c2c29;
+      --color-off-black: #ededea;
+      --color-charcoal: #b8b6b0;
+      --color-graphite: #8a8880;
 
-      --bg-subtle: var(--color-linen-canvas);
-      --bg: var(--color-bone-card);
-      --bg-hover: #2e2e20;
-      --bg-active: #383827;
-      --bg-muted: rgba(158,218,162,0.16);
-      --border: rgba(245,242,223,0.18);
-      --border-strong: rgba(245,242,223,0.72);
-      --border-subtle: rgba(245,242,223,0.10);
-      --fg: var(--color-ink);
-      --fg-muted: var(--color-charcoal);
-      --fg-subtle: rgba(203,199,173,0.72);
+      --pastel-green-bg: rgba(52,101,56,0.20);
+      --pastel-green-fg: #8fc593;
+      --pastel-red-bg: rgba(159,47,45,0.22);
+      --pastel-red-fg: #e39490;
+      --pastel-yellow-bg: rgba(149,100,0,0.20);
+      --pastel-yellow-fg: #d9bb70;
+      --pastel-blue-bg: rgba(31,108,159,0.20);
+      --pastel-blue-fg: #82b8dc;
 
-      --danger: #e07a6e;
-      --warning: #d8bb67;
-      --warning-fg: #e5d191;
-      --warning-bg: rgba(216,187,103,0.14);
-      --btn-primary-bg: var(--color-ink);
-      --btn-primary-fg: #171711;
-      --btn-primary-hover: #fffdf0;
+      --bg-active: #333330;
+      --border: rgba(237,237,234,0.13);
+      --border-strong: rgba(237,237,234,0.30);
+      --border-subtle: rgba(237,237,234,0.07);
+
+      --btn-primary-bg: var(--color-off-black);
+      --btn-primary-fg: #1b1b19;
+      --btn-primary-hover: #ffffff;
     }
   }
 `;

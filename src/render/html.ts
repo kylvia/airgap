@@ -110,62 +110,58 @@ export const CHAT_CSS = `${THEME_CSS}
     font-family: var(--font-sans);
     background: var(--bg-subtle);
     color: var(--fg);
-    line-height: 1.75;
+    line-height: 1.65;
     font-size: 15px;
+    -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 700px; margin: 0 auto; padding: 38px 20px 56px; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 44px 22px 60px; }
   .mark { display: inline-block; vertical-align: middle; color: var(--fg); flex-shrink: 0; }
-  .header { position: relative; text-align: center; padding: 10px 0 26px; overflow: hidden; }
-  .header::before {
-    content: ""; position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
-    width: 300px; max-width: 78%; height: 112px; z-index: 0; pointer-events: none;
-    background: radial-gradient(50% 58% at 50% 48%, var(--accent), transparent 72%);
-    opacity: 0.55;
-    filter: blur(26px);
-  }
-  .header > * { position: relative; z-index: 1; }
+  /* Editorial document header — flat paper, hairline rule, no glow wash. */
+  .header { text-align: center; padding: 4px 0 22px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
   .header .title {
-    font-family: var(--font-serif); font-size: 30px; font-weight: 600;
-    letter-spacing: 0; color: var(--fg); margin-bottom: 8px;
+    font-family: var(--font-serif); font-size: 31px; font-weight: 600;
+    letter-spacing: -0.02em; color: var(--fg); margin-bottom: 9px;
     display: inline-flex; align-items: center; justify-content: center; gap: 12px;
-    line-height: 1.22;
+    line-height: 1.15;
   }
-  .header > div { color: var(--fg-muted); font-size: 13px; }
+  .header > div { color: var(--fg-subtle); font-size: 12.5px; font-family: var(--font-sans); letter-spacing: 0.01em; }
   .turn-label {
-    position: relative; font-family: var(--font-sans);
-    text-align: center; color: var(--fg-subtle); font-size: 12px;
-    margin: 28px 0 14px;
+    font-family: var(--font-sans); text-align: center; color: var(--fg-subtle);
+    font-size: 11px; letter-spacing: 0.05em; margin: 34px 0 16px;
   }
   .turn-label::before {
-    content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 9px;
-    border-radius: 50%; background: var(--accent); vertical-align: 1px;
-    border: 1px solid var(--border);
+    content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 8px;
+    border-radius: 50%; background: var(--accent); vertical-align: 2px;
   }
   .msg-user { display: flex; justify-content: flex-end; margin: 14px 0; }
   .msg-user .bubble {
-    position: relative; background: var(--bg); border: 1px solid var(--border);
-    border-right: 5px solid var(--accent); border-radius: var(--radius-card);
-    padding: 12px 16px; max-width: 82%; font-size: 14.5px; word-break: break-word;
+    position: relative; background: var(--bg); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-card); padding: 12px 16px; max-width: 82%;
+    font-size: 14.5px; word-break: break-word;
+  }
+  .msg-user .bubble::before {
+    content: ""; position: absolute; top: 13px; right: -1px; width: 2px; height: 18px;
+    background: var(--accent); border-radius: 2px;
   }
   .msg-ai {
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-card);
-    padding: 22px 24px; margin: 14px 0; overflow-wrap: break-word;
+    padding: 24px 26px; margin: 14px 0; overflow-wrap: break-word;
   }
   .msg-ai p { margin: 0 0 13px; }
   .msg-ai p:last-child { margin-bottom: 0; }
   .msg-ai strong { font-weight: 600; }
   .msg-ai h2, .msg-ai h3, .msg-ai h4 {
-    font-family: var(--font-serif); font-weight: 600; letter-spacing: 0;
-    margin: 4px 0 14px; line-height: 1.32;
+    font-family: var(--font-serif); font-weight: 600; letter-spacing: -0.02em;
+    margin: 6px 0 14px; line-height: 1.22;
   }
   .msg-ai h2 { font-size: 30px; }
   .msg-ai h3 { font-size: 23px; }
-  .msg-ai h4 { font-size: 20px; }
-  .msg-ai ol, .msg-ai ul { margin: 0 0 13px 1.4em; }
-  .msg-ai li { margin-bottom: 7px; }
+  .msg-ai h4 { font-size: 19px; }
+  .msg-ai ol, .msg-ai ul { margin: 0 0 13px 1.3em; }
+  .msg-ai li { margin-bottom: 6px; }
   .msg-ai code {
     font-family: var(--font-mono); font-size: 13px;
-    background: var(--bg-hover); border: 1px solid var(--border);
+    background: var(--bg-hover); border: 1px solid var(--border-subtle);
     border-radius: var(--radius-input); padding: 1px 5px; color: var(--fg);
   }
   .msg-ai pre {
@@ -175,12 +171,12 @@ export const CHAT_CSS = `${THEME_CSS}
   }
   .msg-ai pre code { background: none; border: none; color: inherit; padding: 0; }
   .msg-ai a { color: var(--fg); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; transition: opacity var(--dur-1) var(--ease); }
-  .msg-ai a:hover { opacity: 0.72; }
+  .msg-ai a:hover { opacity: 0.62; }
   .msg-ai a:focus-visible, .msg-ai details.thinking summary:focus-visible {
     outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-input);
   }
   .msg-ai .toolcard {
-    border: 1px solid var(--border); border-radius: var(--radius-card);
+    border: 1px solid var(--border); border-radius: var(--radius-input);
     background: var(--bg); margin: 0 0 11px; overflow: hidden;
   }
   .msg-ai .toolcard-err { border-color: var(--danger); }
@@ -192,7 +188,7 @@ export const CHAT_CSS = `${THEME_CSS}
     font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; color: var(--fg);
   }
   .msg-ai .tool-status { margin-left: auto; font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
-  .msg-ai .tool-status.ok { color: var(--fg-muted); }
+  .msg-ai .tool-status.ok { color: var(--pastel-green-fg); }
   .msg-ai .tool-status.err { color: var(--danger); }
   .msg-ai .toolcard-in {
     padding: 10px 12px; font-family: var(--font-mono); font-size: 12px; line-height: 1.58;
@@ -204,26 +200,29 @@ export const CHAT_CSS = `${THEME_CSS}
     color: var(--fg-subtle); white-space: pre-wrap; word-break: break-word;
   }
   .msg-ai details.thinking { color: var(--fg-muted); font-size: 13px; margin: 0 0 11px; }
-  .msg-ai details.thinking summary { cursor: pointer; color: var(--fg-muted); font-family: var(--font-sans); font-size: 12.5px; }
+  .msg-ai details.thinking summary { cursor: pointer; color: var(--fg-muted); font-family: var(--font-sans); font-size: 12.5px; display: inline-flex; align-items: center; gap: 7px; }
+  .msg-ai details.thinking summary .tmark { color: var(--accent); flex-shrink: 0; }
   .msg-ai details.thinking .thinking-body {
-    white-space: pre-wrap; margin-top: 7px;
-    border-left: 2px solid var(--accent); padding-left: 12px;
+    white-space: pre-wrap; margin-top: 8px; color: var(--fg-muted);
+    border-left: 2px solid var(--border-strong); padding-left: 12px;
   }
   .footer {
     font-family: var(--font-sans);
     text-align: center; color: var(--fg-subtle); font-size: 11.5px;
-    margin-top: 40px;
+    margin-top: 42px; padding-top: 18px; border-top: 1px solid var(--border);
     display: flex; align-items: center; justify-content: center; gap: 8px;
   }
   .footer .mark { color: var(--fg-subtle); opacity: 0.85; }
-  @media (prefers-color-scheme: dark) {
-    .header::before { opacity: 0.24; }
-  }
 `;
 
 /** airgap 品牌 mark（inline SVG，零外链）：两块圆角矩形中间留一道竖隙，喻 "air gap" 物理隔离。 */
 export function airgapMark(size: number): string {
   return `<svg class="mark" width="${size}" height="${size}" viewBox="0 0 18 18" fill="none" aria-hidden="true"><rect x="1.6" y="3.2" width="5.4" height="11.6" rx="1.6" fill="currentColor"/><rect x="11" y="3.2" width="5.4" height="11.6" rx="1.6" fill="currentColor"/></svg>`;
+}
+
+/** thinking disclosure 的行内标记（clean SVG 取代 emoji）：思考气泡 + 三点。 */
+function thinkingMark(): string {
+  return `<svg class="tmark" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="1.6" y="2.6" width="12.8" height="8.8" rx="2" stroke="currentColor" stroke-width="1.3"/><circle cx="5.2" cy="7" r="0.95" fill="currentColor"/><circle cx="8" cy="7" r="0.95" fill="currentColor"/><circle cx="10.8" cy="7" r="0.95" fill="currentColor"/></svg>`;
 }
 
 /** 单张工具卡：头部（工具名 + 完成/报错状态）+ 完整输入 + 结果摘要，展示 AI 的一步操作。 */
@@ -257,7 +256,7 @@ export function renderTurnBlock(turn: Turn): string {
       inner.push(markdownToHtml(block.text));
     } else if (block.kind === "thinking") {
       inner.push(
-        `<details class="thinking"><summary>💭 思考过程</summary><div class="thinking-body">${escapeHtml(block.text)}</div></details>`,
+        `<details class="thinking"><summary>${thinkingMark()}<span>思考过程</span></summary><div class="thinking-body">${escapeHtml(block.text)}</div></details>`,
       );
     } else {
       inner.push(renderToolCard(block));
@@ -269,7 +268,7 @@ export function renderTurnBlock(turn: Turn): string {
   return out.join("\n");
 }
 
-/** 单文件 Evergreen 风聊天 HTML：linen 纸面 + bone 卡片 + ink/sage 点缀，深色跟随系统（PNG 截图恒为浅色）。 */
+/** 单文件 Dossier 风聊天 HTML：warm bone 纸面 + paper 卡片 + off-black/pastel 点缀，深色跟随系统（PNG 截图恒为浅色）。 */
 export function renderHtml(turns: Turn[], meta: { title: string; date: string }): string {
   const body: string[] = [];
   body.push('  <div class="header">');
