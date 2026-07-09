@@ -58,7 +58,7 @@ describe("renderPage (share picker shell)", () => {
   });
 
   it("关键 DOM/JS 锚点齐全（design.md 清单）", () => {
-    for (const id of ["sess", "sbanner", "list", "preview", "status", "count", "all", "none", "done", "tools", "redact", "loading", "limit"]) {
+    for (const id of ["sess", "sbanner", "list", "preview", "status", "count", "all", "none", "done", "tools", "redact", "loading", "limit", "sid"]) {
       expect(page).toContain(`id="${id}"`);
     }
     expect(page).toContain('data-a="clipboard"');

@@ -39,6 +39,8 @@ interface TurnData {
 
 interface SessionDetail {
   id: string;
+  /** claude | codex —— 前端用它拼对应的 resume 命令（claude --resume / codex resume） */
+  source: string;
   title: string;
   date: string;
   turns: TurnData[];
@@ -110,7 +112,7 @@ async function loadDetail(id: string, tools: ToolDisplay): Promise<SessionDetail
     // findings 始终扫全部字段（含 summary/none 下不渲染的 tool i/o）——从宽标记，与导出闸一致
     findings: scanOneTurn(t, scanString).length,
   }));
-  return { id: info.id, title, date, turns: turnData };
+  return { id: info.id, source: info.source, title, date, turns: turnData };
 }
 
 async function selectedTurns(id: string, want: number[]): Promise<{ info: SessionInfo; turns: Turn[]; title: string; date: string } | null> {

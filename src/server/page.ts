@@ -29,6 +29,12 @@ ${THEME_CSS}
     background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: 13px; max-width: 340px; transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
   header select:hover { border-color: var(--border-strong); }
   header select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  /* 当前会话 id 胶囊：点击复制 resume 命令 */
+  header #sid { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted);
+    border: 1px solid var(--border); border-radius: var(--radius-tag); padding: 3px 10px;
+    cursor: pointer; user-select: none; white-space: nowrap;
+    transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+  header #sid:hover { color: var(--fg); border-color: var(--border-strong); }
   main { flex: 1; display: flex; min-height: 0; position: relative; }
   /* 切换会话/展示级别时盖住内容区：实色纸面（铁律禁半透明材质），品牌 mark 两块交替脉动。
      显隐用 display 硬切（不过渡 opacity/visibility）：headless 截图合成对这类过渡不可靠，且遮罩不需要淡入。 */
@@ -94,6 +100,7 @@ ${THEME_CSS}
       <option value="20">近 20 条</option>
       <option value="50">近 50 条</option>
     </select>
+    <span id="sid" style="display:none" title="点击复制 resume 命令（含完整会话 id）"></span>
   </header>
   <div class="sbanner" id="sbanner"></div>
   <main>
@@ -213,6 +220,15 @@ async function loadSession(id, keepSelection) {
       for (const t of detail.turns) if (!t.tag) selected.add(t.index);
     }
     renderList(); buildPreviewShell();
+    // 会话 id 胶囊：显示前 8 位，点击复制完整 resume 命令（claude/codex 命令不同）
+    const sid = $("sid");
+    sid.textContent = detail.id.slice(0, 8);
+    sid.style.display = "";
+    sid.onclick = async () => {
+      const cmd = (detail.source === "codex" ? "codex resume " : "claude --resume ") + detail.id;
+      try { await navigator.clipboard.writeText(cmd); setStatus("已复制：" + cmd); }
+      catch { setStatus(cmd); } // 剪贴板不可用就把命令亮在状态栏，手动抄
+    };
     setStatus(keepSelection
       ? "已按新的工具展示级别刷新预览。"
       : "共 " + detail.turns.length + " 轮，已默认勾选 " + selected.size + " 轮真实对话。");
