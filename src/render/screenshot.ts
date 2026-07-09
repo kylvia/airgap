@@ -211,7 +211,13 @@ export async function renderPngViaChrome(html: string, outFile: string, chromePa
     await writeFile(outFile, Buffer.from(data, "base64"));
   } finally {
     client?.close();
-    chrome.kill();
+    // Headless Chrome can ignore SIGTERM long enough that its still-open stderr pipe +
+    // live child handle keep Node's event loop alive — the CLI would render the PNG but
+    // never return the shell prompt. SIGKILL it, close the pipe, and unref so Node can
+    // exit without waiting on the child.
+    chrome.stderr?.destroy();
+    chrome.kill("SIGKILL");
+    chrome.unref();
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
   }
 }

@@ -1,8 +1,12 @@
 import type { Command } from "commander";
+import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import path from "node:path";
 import pc from "picocolors";
 import { scanSessionFile } from "../detect/scanner.js";
 import { discoverSessions } from "../discovery.js";
+import { renderScanReport, type ScanReportData } from "../render/scan-report.js";
+import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
 import type { Finding, SessionInfo, SessionSource, Severity } from "../types.js";
 
 interface ScanCliOptions {
@@ -10,6 +14,9 @@ interface ScanCliOptions {
   source?: string;
   project?: string;
   list?: boolean;
+  html?: boolean;
+  png?: boolean;
+  out?: string;
 }
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium"];
@@ -145,6 +152,41 @@ function printList(findings: Finding[]): void {
   }
 }
 
+/** Build the shareable report-card data from grouped results. */
+function buildReportData(
+  results: Array<{ info: SessionInfo; findings: Finding[] }>,
+  allFindings: Finding[],
+  scannedSessions: number,
+  hitSessions: number,
+  elapsedSeconds: number,
+  sources: SessionSource[] | undefined,
+): ScanReportData {
+  const SHOWN = 8;
+  const now = Date.now();
+  const groups = groupByProject(results);
+  const bySeverity: Record<Severity, number> = { critical: 0, high: 0, medium: 0 };
+  for (const f of allFindings) bySeverity[f.severity] += 1;
+  const sourceLabel = sources ? (sources[0] === "claude" ? "~/.claude" : "~/.codex") : "~/.claude + ~/.codex";
+  return {
+    scannedSessions,
+    hitSessions,
+    elapsedSeconds,
+    bySeverity,
+    groups: groups.slice(0, SHOWN).map((g) => ({
+      project: g.project,
+      hitSessions: g.hitSessions,
+      totalSessions: g.totalSessions,
+      critical: g.bySeverity.critical,
+      high: g.bySeverity.high,
+      medium: g.bySeverity.medium,
+      oldestDays: Math.max(0, Math.floor((now - g.oldestHitMtimeMs) / DAY_MS)),
+    })),
+    moreGroups: Math.max(0, groups.length - SHOWN),
+    sourceLabel,
+    date: new Date().toISOString().slice(0, 10),
+  };
+}
+
 function printSummary(hitSessions: number, totalSessions: number): void {
   console.log("");
   if (hitSessions > 0) {
@@ -181,6 +223,36 @@ async function runScan(opts: ScanCliOptions): Promise<void> {
 
   const allFindings = results.flatMap((r) => r.findings);
   const hitSessions = results.filter((r) => r.findings.length > 0).length;
+
+  if (opts.png || opts.html) {
+    // Shareable Dossier report card (single-file HTML, or PNG via system Chrome).
+    // Counts and basename-only project labels only — never a secret preview.
+    const data = buildReportData(results, allFindings, sessions.length, hitSessions, Number(elapsed), sources);
+    const html = renderScanReport(data);
+    const outFile = path.resolve(opts.out ?? `airgap-scan-${data.date}.${opts.png ? "png" : "html"}`);
+    if (opts.png) {
+      const chrome = findChrome();
+      if (!chrome) {
+        console.error(
+          pc.red("没找到本机 Chrome/Chromium（PNG 出图需要它）。可设 CHROME_PATH 指定，或改用 --html 输出单文件网页。"),
+        );
+        process.exitCode = 1;
+        return;
+      }
+      try {
+        await renderPngViaChrome(html, outFile, chrome);
+      } catch (err) {
+        console.error(pc.red(err instanceof Error ? err.message : String(err)));
+        process.exitCode = 1;
+        return;
+      }
+    } else {
+      await writeFile(outFile, html, "utf8");
+    }
+    console.log(`${pc.green("✔")} 扫描报告卡 · ${hitSessions}/${sessions.length} 会话命中 → ${outFile}`);
+    if (allFindings.length > 0) process.exitCode = 1;
+    return;
+  }
 
   if (opts.json) {
     // Machine-readable output. The raw secret text is deliberately omitted —
@@ -223,6 +295,9 @@ export function registerScan(program: Command): void {
     .option("--source <source>", "limit to one source: claude | codex")
     .option("--project <substr>", "only sessions whose project path contains <substr>")
     .option("--list", "print every finding on its own line (masked preview)")
+    .option("--html", "render a shareable scan report card (single-file HTML)")
+    .option("--png", "render the scan report card as a PNG (requires a local Chrome)")
+    .option("--out <file>", "output file path for --html / --png")
     .action(async (opts: ScanCliOptions) => {
       await runScan(opts);
     });
