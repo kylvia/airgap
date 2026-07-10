@@ -43,7 +43,7 @@ One extraction/detection core, multiple exits:
 - `src/commands/` — one `registerX(program)` per subcommand (scan/pack/open/show/share/doctor), wired in `src/index.ts` via commander.
 - `src/render/` — `turns.ts` converts records → `Turn[]` for both dialects; `markdown.ts` / `html.ts` (md→html via markdown-it: `html:false` + images restricted to `data:` URIs, XSS-safe and zero-external) / `screenshot.ts` (PNG via system Chrome, zero puppeteer dep); `theme.ts` is the single source of truth for Dossier visual tokens (warm bone canvas, paper cards, off-black text/actions, muted pastel semantic accents; dark mode via `prefers-color-scheme`).
 - `src/server/` — local web UI for `share` (pick turns, preview, export long-image).
-- `plugin/` — Claude Code plugin: slash commands that shell out to `npx airgap`, plus a PreCompact hook snapshotting transcripts to `~/.airgap/rescue/`.
+- `plugins/airgap/` — shared assistant plugin package: Claude Code slash commands + PreCompact rescue hook, and a Codex `airgap-share` skill. Both clients shell out to the same `airgap` CLI; manifests live in `.claude-plugin/` and `.codex-plugin/` inside this directory.
 
 ## Invariants (do not break)
 

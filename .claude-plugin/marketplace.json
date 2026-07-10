@@ -8,13 +8,13 @@
   "plugins": [
     {
       "name": "airgap",
-      "source": "./plugin",
-      "description": "Slash commands for airgap (scan / pack / share / rescue) plus a PreCompact hook that snapshots the session before compaction.",
+      "source": "./plugins/airgap",
+      "description": "Claude Code commands and rescue hook plus a Codex skill for opening the local airgap share picker.",
       "version": "0.1.0",
       "author": {
         "name": "airgap"
       },
-      "keywords": ["claude-code", "secrets", "redaction", "handoff", "backup"]
+      "keywords": ["claude-code", "codex", "secrets", "redaction", "handoff", "share", "backup"]
     }
   ]
 }
