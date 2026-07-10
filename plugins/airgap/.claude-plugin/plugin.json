@@ -7,8 +7,6 @@
   "author": {
     "name": "airgap"
   },
-  "homepage": "https://github.com/airgap-cli/airgap",
-  "repository": "https://github.com/airgap-cli/airgap",
   "license": "MIT",
   "keywords": ["claude-code", "codex", "session", "secrets", "redaction", "handoff", "backup"],
   "commands": "./commands/",

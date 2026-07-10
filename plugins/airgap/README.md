@@ -57,7 +57,7 @@ Open a new task or restart Codex so the skill is discovered, then invoke `$airga
 | Command | What it does |
 | --- | --- |
 | `/airgap:share` | Open the local picker directly. |
-| `/airgap:airgap-share` | Compatibility alias for `/airgap:share`. |
+| `/airgap:airgap-share` | Legacy alias provided by the shared `airgap-share` skill; after launch, it points users to `/airgap:share`. |
 | `/airgap:airgap-scan` | Scan `~/.claude` and `~/.codex` for plaintext API keys / secrets. |
 | `/airgap:airgap-pack` | Redact and pack the current session into a portable `.ccpack`. |
 | `/airgap:airgap-rescue` | List and recover PreCompact rescue snapshots. |

@@ -27,8 +27,10 @@ describe("shared airgap plugin package", () => {
 
     const claudeManifest = JSON.parse(
       await readRepoFile("plugins/airgap/.claude-plugin/plugin.json"),
-    ) as { name: string; version: string };
+    ) as { name: string; version: string; homepage?: unknown; repository?: unknown };
     expect(claudeManifest).toMatchObject({ name: "airgap", version: "0.1.0" });
+    expect(claudeManifest.homepage).toBeUndefined();
+    expect(claudeManifest.repository).toBeUndefined();
   });
 
   it("isolates Claude hooks from Codex automatic discovery", async () => {
@@ -57,6 +59,13 @@ describe("shared airgap plugin package", () => {
     expect(server).toContain('p === "/api/close"');
     expect(command).toContain("if (opts.open !== false) openBrowser(server.url)");
   });
+
+  it("keeps the share-command regression harness compatible with Node 18", async () => {
+    const harness = await readRepoFile("test/share-command.test.ts");
+    expect(harness).not.toContain("--import");
+    expect(harness).not.toContain("--input-type");
+    expect(harness).toContain("tsx/cli");
+  });
 });
 
 describe("Claude quick launch", () => {
@@ -75,16 +84,41 @@ describe("Claude quick launch", () => {
     expect(command).not.toContain("Option 1 (default)");
   });
 
-  it("keeps /airgap:airgap-share as a working compatibility alias", async () => {
-    const legacy = await readRepoFile("plugins/airgap/commands/airgap-share.md");
-    expect(legacy.match(/^allowed-tools:.*$/m)?.[0]).toBe(
+  it("keeps command names disjoint from shared skills while preserving the legacy alias", async () => {
+    const [commandEntries, skillEntries, sharedSkill, pluginReadme] = await Promise.all([
+      readdir(path.join(root, "plugins/airgap/commands"), { withFileTypes: true }),
+      readdir(path.join(root, "plugins/airgap/skills"), { withFileTypes: true }),
+      readRepoFile("plugins/airgap/skills/airgap-share/SKILL.md"),
+      readRepoFile("plugins/airgap/README.md"),
+    ]);
+    const commands = commandEntries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+      .map((entry) => path.parse(entry.name).name)
+      .sort();
+    const skills = skillEntries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+
+    expect(commands).toContain("share");
+    expect(skills).toContain("airgap-share");
+    expect(commands.filter((command) => skills.includes(command))).toEqual([]);
+
+    const frontmatter = sharedSkill.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+    expect(frontmatter.match(/^allowed-tools:.*$/m)?.[0]).toBe(
       "allowed-tools: Bash(airgap share)",
     );
-    expect(legacy).not.toContain("npx airgap share");
-    expect(legacy).not.toContain("airgap*");
-    expect(legacy).toContain("compatibility alias");
-    expect(legacy).toContain("/airgap:share");
-    expect(legacy).toContain("http://localhost:<port>/");
+    expect(frontmatter).not.toContain("disable-model-invocation: true");
+    expect(sharedSkill).not.toContain("npx airgap share");
+    expect(sharedSkill).toContain(
+      "In Claude Code, `/airgap:share` is the preferred command.",
+    );
+    expect(sharedSkill).toContain(
+      "If invoked through the legacy `/airgap:airgap-share` alias, complete the launch first, then mention the shorter command.",
+    );
+    expect(pluginReadme).toContain(
+      "Legacy alias provided by the shared `airgap-share` skill",
+    );
   });
 });
 

@@ -1,11 +1,14 @@
 ---
 name: airgap-share
 description: Open airgap's local picker for the current Claude or Codex coding conversation when the user asks to "share this coding session", "open airgap share", "分享这段会话", or "打开 airgap 分享页". Do not use for generic file, link, or social sharing.
+allowed-tools: Bash(airgap share)
 ---
 
 # Airgap Share
 
 Open the picker in one step while keeping the process local and temporary.
+
+In Claude Code, `/airgap:share` is the preferred command. If invoked through the legacy `/airgap:airgap-share` alias, complete the launch first, then mention the shorter command.
 
 ## Workflow
 
