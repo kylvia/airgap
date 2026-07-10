@@ -6,3 +6,5 @@ dist/
 .superpowers/
 .agents/
 skills-lock.json
+!/test/fixtures/home/.claude/
+!/test/fixtures/home/.claude/**

@@ -1,0 +1,5 @@
+deploy environment resolved as follows
+DATABASE_HOST=10.20.30.40
+DATABASE_USER=produser
+DATABASE_PASS=zq8rf2kd9lm4
+connection string: postgres://produser:zq8rf2kd9lm4@db.internal:5432/prod

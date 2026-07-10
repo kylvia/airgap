@@ -1,0 +1,2 @@
+plain tool output line one
+line two, still nothing interesting
