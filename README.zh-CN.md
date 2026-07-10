@@ -92,6 +92,35 @@ npx airgap open pack.ccpack --print-only     # 只解包 + 列文件，不安装
 npx airgap open pack.ccpack --project ~/dst  # 指定装到哪个项目目录
 ```
 
+## 打开本地选择器 —— `share`
+
+先在可信的本地 checkout 中编译并链接一次 CLI：
+
+```sh
+npm run build && npm link
+```
+
+需要挑选几轮对话、实时预览并导出长图 / HTML / Markdown 时，启动本地选择器：
+
+```sh
+airgap share
+```
+
+浏览器会自动打开。服务只绑定 loopback（本机回环地址），不接受远程连接；用完点本页的 **完成关闭**，或空闲 10 分钟后自动退出。airgap 自身不常驻，只在你唤起时运行。
+
+安装[本地助手插件](./plugins/airgap/README.md)后，在 AI 编码对话里也能一步唤起：
+
+- Claude Code：`/airgap:share`
+- Codex：`$airgap-share`
+
+终端高频用户可以自行添加短别名（airgap 不会自动修改 shell 配置）：
+
+```sh
+alias ags='airgap share'
+```
+
+也可以让 Raycast、Alfred 或 macOS 快捷指令把个人快捷键绑定到同一个 `airgap share` 命令。常驻的是你已有的启动器，不是 airgap。
+
 ## 把几轮对话出成图 —— show
 
 日常场景：你就是想发个片段截图。

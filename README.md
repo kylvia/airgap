@@ -92,6 +92,35 @@ npx airgap open pack.ccpack --print-only     # just extract + list files, don't 
 npx airgap open pack.ccpack --project ~/dst  # choose the target project directory
 ```
 
+## Open the local picker — `share`
+
+From a trusted local checkout, build and link the CLI once:
+
+```sh
+npm run build && npm link
+```
+
+When you want to select a few turns, preview them, and export a long image / HTML / Markdown, start the picker:
+
+```sh
+airgap share
+```
+
+The browser opens automatically. The server binds only to the loopback interface, so it does not accept remote connections. Click **完成关闭** on the page when finished; ten minutes of inactivity also stops the process. The picker runs only when invoked: airgap itself does not stay resident.
+
+With the [local assistant plugin](./plugins/airgap/README.md) installed, an AI coding conversation becomes a one-step entry point:
+
+- Claude Code: `/airgap:share`
+- Codex: `$airgap-share`
+
+For a shorter terminal command, add your own alias (airgap never edits shell files for you):
+
+```sh
+alias ags='airgap share'
+```
+
+Raycast, Alfred, or macOS Shortcuts can optionally bind a personal hotkey to the same `airgap share` command. The launcher may stay resident, but airgap does not.
+
 ## Turn a few turns into a shareable image — `show`
 
 For the everyday case where you just want to post a snippet:

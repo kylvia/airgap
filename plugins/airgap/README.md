@@ -1,68 +1,95 @@
-# airgap — Claude Code plugin
+# airgap assistant plugin
 
-Slash commands and a rescue hook for [airgap](https://github.com/airgap-cli/airgap),
-the local "airport security + baggage handling" for your AI coding sessions:
-scan for leaked secrets, redact-and-carry a session to another machine, or render
-a few turns into something shareable. No cloud, no account.
+This local-checkout plugin opens airgap's share picker from Claude Code or Codex without making you copy a second command into a terminal. The same package also provides Claude commands for scan / pack / rescue and a PreCompact rescue hook.
 
-The commands shell out to `npx airgap`, so you do not need airgap installed
-globally — `npx` fetches it on first use.
+## Prepare the local CLI
+
+From a trusted local checkout, build and link the CLI once:
+
+```sh
+npm run build && npm link
+```
+
+This makes the checkout's `airgap` executable available to both assistant integrations. No resident helper or remote package is required.
+
+## Quick launch
+
+- Claude Code: `/airgap:share`
+- Codex: `$airgap-share`
+- Terminal: `airgap share`
+
+All three start the same picker, bound only to the loopback interface. Use **完成关闭** on the page when finished; ten minutes of inactivity also stops the process. The picker runs only when invoked: airgap itself does not stay resident.
+
+For a shorter terminal entry, add your own alias:
+
+```sh
+alias ags='airgap share'
+```
+
+You can optionally bind Raycast, Alfred, or macOS Shortcuts to `airgap share`. Airgap does not install a global hotkey or resident helper.
+
+## Install from a local checkout
+
+Replace `/absolute/path/to/airgap` below with the absolute path to this repository.
+
+### Claude Code
+
+```text
+/plugin marketplace add /absolute/path/to/airgap
+/plugin install airgap@airgap-marketplace
+```
+
+Run `/reload-plugins` or restart Claude Code so the commands and PreCompact hook load.
+
+### Codex
+
+```sh
+codex plugin marketplace add /absolute/path/to/airgap
+codex plugin add airgap@airgap-marketplace
+```
+
+Open a new task or restart Codex so the skill is discovered, then invoke `$airgap-share` or ask to open the local airgap share picker.
 
 ## What you get
 
-**Slash commands**
+### Claude Code commands
 
 | Command | What it does |
 | --- | --- |
+| `/airgap:share` | Open the local picker directly. |
+| `/airgap:airgap-share` | Compatibility alias for `/airgap:share`. |
 | `/airgap:airgap-scan` | Scan `~/.claude` and `~/.codex` for plaintext API keys / secrets. |
-| `/airgap:airgap-pack` | Redact + pack the current session into a portable `.ccpack` for another machine. |
-| `/airgap:airgap-share` | Render selected turns to a long-image / HTML / Markdown. |
-| `/airgap:airgap-rescue` | List and recover PreCompact snapshots from the rescue ring buffer. |
+| `/airgap:airgap-pack` | Redact and pack the current session into a portable `.ccpack`. |
+| `/airgap:airgap-rescue` | List and recover PreCompact rescue snapshots. |
 
-(Plugin commands are namespaced: `airgap` is the plugin name, so the full form is
-`/airgap:airgap-scan`.)
+### Codex skill
 
-**PreCompact rescue hook**
+`$airgap-share` starts the same local picker and returns its localhost URL. Its trigger is intentionally narrow: opening airgap share or sharing selected turns from the current Claude or Codex coding conversation.
 
-Right before Claude Code compacts (summarizes + truncates) your conversation, the
-plugin snapshots the *full* transcript into `~/.airgap/rescue/`, keeping the newest
-20. Compaction is lossy; this gives you an undo. The hook never blocks compaction
-and adds no network calls — it just copies the live transcript file.
+### Claude PreCompact rescue hook
 
-Snapshots are named `<UTC-timestamp>__<manual|auto>__<session-id>.jsonl`, stored
-`0600` in a `0700` directory, and never leave the machine. Recover one with
-`/airgap:airgap-rescue` (raw transcript — run `airgap pack` if you want it redacted).
+Right before Claude Code compacts (summarizes and truncates) a conversation, the plugin snapshots the full transcript into `~/.airgap/rescue/`, keeping the newest 20. The hook never blocks compaction and adds no network calls; it copies only the live local transcript.
 
-## Install
-
-The plugin is distributed through the airgap marketplace. Add the marketplace,
-then install:
-
-```
-/plugin marketplace add airgap-cli/airgap
-/plugin install airgap@airgap-marketplace
-```
-
-`airgap-cli/airgap` is the GitHub `owner/repo` hosting the marketplace's
-`.claude-plugin/marketplace.json`. You can also point at a local checkout:
-
-```
-/plugin marketplace add /path/to/airgap
-/plugin install airgap@airgap-marketplace
-```
-
-Then restart Claude Code (or `/reload-plugins`) so the commands and hook load.
+Snapshots are named `<UTC-timestamp>__<manual|auto>__<session-id>.jsonl`, stored `0600` in a `0700` directory, and never leave the machine. Recover one with `/airgap:airgap-rescue`; run `airgap pack` if the recovered transcript must be redacted before sharing.
 
 ## Requirements
 
-- Node.js ≥ 18 (for `npx airgap`).
-- Claude Code with plugin support (PreCompact hook + `commands/` + marketplace install).
+- Node.js 18 or newer.
+- A trusted local checkout prepared with `npm run build && npm link`.
+- Claude Code plugin support for Claude commands/hooks, or Codex plugin support for the Codex skill.
 
 ## Uninstall
 
-```
+Claude Code:
+
+```text
 /plugin uninstall airgap@airgap-marketplace
 ```
 
-Rescue snapshots in `~/.airgap/rescue/` are yours; delete them manually if you
-want them gone.
+Codex:
+
+```sh
+codex plugin remove airgap@airgap-marketplace
+```
+
+Rescue snapshots in `~/.airgap/rescue/` remain yours and are not deleted automatically.

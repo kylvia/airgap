@@ -151,3 +151,79 @@ describe("Codex quick launch", () => {
     expect(description).toContain("Do not use for generic file, link, or social sharing");
   });
 });
+
+describe("quick-launch documentation", () => {
+  function sectionBetween(document: string, startHeading: string, endHeading: string): string {
+    const start = document.indexOf(startHeading);
+    const end = document.indexOf(endHeading, start + startHeading.length);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    return document.slice(start, end);
+  }
+
+  it("documents local conversation, terminal, alias, and launcher entry points", async () => {
+    const [english, chinese, pluginReadme] = await Promise.all([
+      readRepoFile("README.md"),
+      readRepoFile("README.zh-CN.md"),
+      readRepoFile("plugins/airgap/README.md"),
+    ]);
+    const englishShare = sectionBetween(
+      english,
+      "## Open the local picker — `share`",
+      "## Turn a few turns into a shareable image — `show`",
+    );
+    const chineseShare = sectionBetween(
+      chinese,
+      "## 打开本地选择器 —— `share`",
+      "## 把几轮对话出成图 —— show",
+    );
+
+    for (const readme of [englishShare, chineseShare, pluginReadme]) {
+      expect(readme).toContain("airgap share");
+      expect(readme).toContain("/airgap:share");
+      expect(readme).toContain("$airgap-share");
+      expect(readme).toContain("alias ags='airgap share'");
+      expect(readme).toContain("npm run build && npm link");
+      expect(readme).toContain("loopback");
+      expect(readme).toContain("完成关闭");
+    }
+    expect(englishShare).toMatch(/Raycast[\s\S]*Alfred[\s\S]*macOS Shortcuts/);
+    expect(englishShare).toContain("ten minutes of inactivity");
+    expect(englishShare).toContain("airgap itself does not stay resident");
+    expect(chineseShare).toMatch(/Raycast[\s\S]*Alfred[\s\S]*macOS 快捷指令/);
+    expect(chineseShare).toContain("空闲 10 分钟");
+    expect(chineseShare).toContain("airgap 自身不常驻");
+    expect(pluginReadme).toMatch(/Raycast[\s\S]*Alfred[\s\S]*macOS Shortcuts/);
+    expect(pluginReadme).toContain("ten minutes of inactivity");
+    expect(pluginReadme).toContain("airgap itself does not stay resident");
+    expect(englishShare).not.toContain("npx airgap share");
+    expect(chineseShare).not.toContain("npx airgap share");
+  });
+
+  it("documents local plugin installation and preserves rescue and uninstall guidance", async () => {
+    const pluginReadme = await readRepoFile("plugins/airgap/README.md");
+
+    expect(pluginReadme).toContain("/plugin marketplace add /absolute/path/to/airgap");
+    expect(pluginReadme).toContain("/plugin install airgap@airgap-marketplace");
+    expect(pluginReadme).toContain("/reload-plugins");
+    expect(pluginReadme).toContain(
+      "codex plugin marketplace add /absolute/path/to/airgap",
+    );
+    expect(pluginReadme).toContain("codex plugin add airgap@airgap-marketplace");
+    expect(pluginReadme).toContain("new task");
+    expect(pluginReadme).toContain("restart Codex");
+    for (const command of [
+      "/airgap:share",
+      "/airgap:airgap-share",
+      "/airgap:airgap-scan",
+      "/airgap:airgap-pack",
+      "/airgap:airgap-rescue",
+    ]) {
+      expect(pluginReadme).toContain(`| \`${command}\` |`);
+    }
+    expect(pluginReadme).toContain("PreCompact rescue hook");
+    expect(pluginReadme).toContain("## Uninstall");
+    expect(pluginReadme).not.toContain("airgap-cli/airgap");
+    expect(pluginReadme).not.toContain("npx airgap share");
+  });
+});
