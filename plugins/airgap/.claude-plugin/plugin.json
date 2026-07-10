@@ -3,7 +3,7 @@
   "name": "airgap",
   "displayName": "airgap",
   "version": "0.1.0",
-  "description": "Scan, redact, and carry your local AI coding sessions — no cloud, no accounts. Adds /airgap-scan, /airgap-pack, /airgap-share plus a PreCompact rescue hook that snapshots the session before compaction.",
+  "description": "Scan, redact, carry, and share local AI coding sessions — no cloud, no accounts. Adds /airgap:share plus scan, pack, and rescue commands; /airgap:airgap-share remains a compatibility alias.",
   "author": {
     "name": "airgap"
   },

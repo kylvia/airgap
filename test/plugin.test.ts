@@ -42,3 +42,23 @@ describe("shared airgap plugin package", () => {
     expect(command).toContain("if (opts.open !== false) openBrowser(server.url)");
   });
 });
+
+describe("Claude quick launch", () => {
+  it("exposes /airgap:share as a direct background launch", async () => {
+    const command = await readRepoFile("plugins/airgap/commands/share.md");
+    expect(command).toContain("disable-model-invocation: true");
+    expect(command).toContain("allowed-tools: Bash(airgap share*), Bash(npx airgap*)");
+    expect(command).toContain("background execution");
+    expect(command).toContain("http://localhost:<port>/");
+    expect(command).toContain("Do not claim success");
+    expect(command).toContain("run `airgap share` in a terminal");
+    expect(command).not.toContain("Option 1 (default)");
+  });
+
+  it("keeps /airgap:airgap-share as a working compatibility alias", async () => {
+    const legacy = await readRepoFile("plugins/airgap/commands/airgap-share.md");
+    expect(legacy).toContain("compatibility alias");
+    expect(legacy).toContain("/airgap:share");
+    expect(legacy).toContain("http://localhost:<port>/");
+  });
+});
