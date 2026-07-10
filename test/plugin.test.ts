@@ -65,3 +65,42 @@ describe("Claude quick launch", () => {
     expect(legacy).toContain("http://localhost:<port>/");
   });
 });
+
+describe("Codex quick launch", () => {
+  it("packages exactly one airgap-share skill", async () => {
+    const manifest = JSON.parse(
+      await readRepoFile("plugins/airgap/.codex-plugin/plugin.json"),
+    ) as {
+      name: string;
+      version: string;
+      skills: string;
+      apps?: unknown;
+      mcpServers?: unknown;
+      interface: { defaultPrompt: string[] };
+    };
+    expect(manifest).toMatchObject({
+      name: "airgap",
+      version: "0.1.0",
+      skills: "./skills/",
+    });
+    expect(manifest.apps).toBeUndefined();
+    expect(manifest.mcpServers).toBeUndefined();
+    expect(manifest.interface.defaultPrompt[0]).toContain("airgap share");
+  });
+
+  it("keeps the Codex skill narrow, local, and on demand", async () => {
+    const skill = await readRepoFile("plugins/airgap/skills/airgap-share/SKILL.md");
+    const metadata = await readRepoFile(
+      "plugins/airgap/skills/airgap-share/agents/openai.yaml",
+    );
+    expect(skill).toMatch(/^---\nname: airgap-share\ndescription:/);
+    expect(skill).toContain("airgap share");
+    expect(skill).toContain("background or long-running process support");
+    expect(skill).toContain("http://localhost:<port>/");
+    expect(skill).toContain("Never create a daemon");
+    expect(skill).toContain("Never modify shell startup files");
+    expect(skill).toContain("run `airgap share` in a terminal");
+    expect(metadata).toContain('display_name: "airgap Share"');
+    expect(metadata).toContain("$airgap-share");
+  });
+});

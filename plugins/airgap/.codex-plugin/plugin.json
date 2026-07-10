@@ -1,0 +1,26 @@
+{
+  "name": "airgap",
+  "version": "0.1.0",
+  "description": "Open airgap's local picker to select and safely export AI coding session turns.",
+  "author": {
+    "name": "airgap",
+    "url": "https://github.com/airgap-cli"
+  },
+  "homepage": "https://github.com/airgap-cli/airgap",
+  "repository": "https://github.com/airgap-cli/airgap",
+  "license": "MIT",
+  "keywords": ["claude-code", "codex", "session", "share", "redaction", "local-first"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "airgap",
+    "shortDescription": "Share local AI coding sessions safely",
+    "longDescription": "Launch airgap's local session picker from Codex, select the turns to include, preview the result, and export without adding a cloud service or resident process.",
+    "developerName": "airgap",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Read"],
+    "websiteURL": "https://github.com/airgap-cli/airgap",
+    "defaultPrompt": [
+      "Open airgap share so I can select and export turns from this session."
+    ]
+  }
+}

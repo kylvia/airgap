@@ -1,0 +1,4 @@
+interface:
+  display_name: "airgap Share"
+  short_description: "Open the local airgap session picker"
+  default_prompt: "Use $airgap-share to open the local picker for this AI coding session."
