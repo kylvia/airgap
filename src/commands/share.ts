@@ -12,11 +12,13 @@ interface ShareOpts {
 }
 
 /** 用系统默认方式打开一个 URL（open/xdg-open/start），best-effort，不阻塞。 */
-function openBrowser(url: string): void {
+export function openBrowser(url: string): void {
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
   try {
-    spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+    const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => {});
+    child.unref();
   } catch {
     /* 打不开就靠 stdout 打印的 URL 兜底 */
   }

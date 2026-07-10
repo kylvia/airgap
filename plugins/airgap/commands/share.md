@@ -1,7 +1,7 @@
 ---
 description: Open the local airgap picker to select, preview, and export turns from a Claude or Codex session
 disable-model-invocation: true
-allowed-tools: Bash(airgap share*), Bash(npx airgap*)
+allowed-tools: Bash(airgap share), Bash(npx airgap share)
 ---
 
 Open the local airgap share picker now. The user explicitly invoked this command, so do not send them to a terminal for a second step.

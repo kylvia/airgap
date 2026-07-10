@@ -1,7 +1,7 @@
 ---
 description: Compatibility alias for /airgap:share — open the local airgap session picker
 disable-model-invocation: true
-allowed-tools: Bash(airgap share*), Bash(npx airgap*)
+allowed-tools: Bash(airgap share), Bash(npx airgap share)
 ---
 
 This is the compatibility alias for `/airgap:share`. Tell the user the shorter command is now preferred, then complete the launch without requiring a second terminal step.
