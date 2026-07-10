@@ -12,8 +12,12 @@ async function readRepoFile(relativePath: string): Promise<string> {
 describe("shared airgap plugin package", () => {
   it("keeps one marketplace entry pointing at plugins/airgap", async () => {
     const marketplace = JSON.parse(await readRepoFile(".claude-plugin/marketplace.json")) as {
+      description: string;
       plugins: Array<{ name: string; source: string; version: string }>;
     };
+    expect(marketplace.description).toBe(
+      "airgap — scan, redact, carry, and share local AI coding sessions. No cloud, no accounts.",
+    );
     expect(marketplace.plugins).toHaveLength(1);
     expect(marketplace.plugins[0]).toMatchObject({
       name: "airgap",

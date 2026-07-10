@@ -4,7 +4,7 @@
   "owner": {
     "name": "airgap"
   },
-  "description": "airgap — scan, redact, and carry your local AI coding sessions. No cloud, no accounts.",
+  "description": "airgap — scan, redact, carry, and share local AI coding sessions. No cloud, no accounts.",
   "plugins": [
     {
       "name": "airgap",
