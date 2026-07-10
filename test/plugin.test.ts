@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -31,6 +31,22 @@ describe("shared airgap plugin package", () => {
     expect(claudeManifest).toMatchObject({ name: "airgap", version: "0.1.0" });
   });
 
+  it("isolates Claude hooks from Codex automatic discovery", async () => {
+    await expect(readRepoFile("plugins/airgap/hooks/hooks.json")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    const claudeManifest = JSON.parse(
+      await readRepoFile("plugins/airgap/.claude-plugin/plugin.json"),
+    ) as { hooks: string };
+    expect(claudeManifest.hooks).toBe("./claude-hooks/hooks.json");
+
+    const hookConfig = JSON.parse(
+      await readRepoFile("plugins/airgap/claude-hooks/hooks.json"),
+    ) as { hooks: { PreCompact: unknown[] } };
+    expect(hookConfig.hooks.PreCompact).toHaveLength(2);
+  });
+
   it("keeps the existing share runtime loopback-only and temporary", async () => {
     const server = await readRepoFile("src/server/share-server.ts");
     const command = await readRepoFile("src/commands/share.ts");
@@ -47,7 +63,10 @@ describe("Claude quick launch", () => {
   it("exposes /airgap:share as a direct background launch", async () => {
     const command = await readRepoFile("plugins/airgap/commands/share.md");
     expect(command).toContain("disable-model-invocation: true");
-    expect(command).toContain("allowed-tools: Bash(airgap share), Bash(npx airgap share)");
+    expect(command.match(/^allowed-tools:.*$/m)?.[0]).toBe(
+      "allowed-tools: Bash(airgap share)",
+    );
+    expect(command).not.toContain("npx airgap share");
     expect(command).not.toContain("airgap*");
     expect(command).toContain("background execution");
     expect(command).toContain("http://localhost:<port>/");
@@ -58,7 +77,10 @@ describe("Claude quick launch", () => {
 
   it("keeps /airgap:airgap-share as a working compatibility alias", async () => {
     const legacy = await readRepoFile("plugins/airgap/commands/airgap-share.md");
-    expect(legacy).toContain("allowed-tools: Bash(airgap share), Bash(npx airgap share)");
+    expect(legacy.match(/^allowed-tools:.*$/m)?.[0]).toBe(
+      "allowed-tools: Bash(airgap share)",
+    );
+    expect(legacy).not.toContain("npx airgap share");
     expect(legacy).not.toContain("airgap*");
     expect(legacy).toContain("compatibility alias");
     expect(legacy).toContain("/airgap:share");
@@ -75,8 +97,11 @@ describe("Codex quick launch", () => {
       version: string;
       skills: string;
       apps?: unknown;
+      author: { name: string; url?: unknown };
+      homepage?: unknown;
       mcpServers?: unknown;
-      interface: { defaultPrompt: string[] };
+      repository?: unknown;
+      interface: { defaultPrompt: string[]; websiteURL?: unknown };
     };
     expect(manifest).toMatchObject({
       name: "airgap",
@@ -84,7 +109,11 @@ describe("Codex quick launch", () => {
       skills: "./skills/",
     });
     expect(manifest.apps).toBeUndefined();
+    expect(manifest.author.url).toBeUndefined();
+    expect(manifest.homepage).toBeUndefined();
     expect(manifest.mcpServers).toBeUndefined();
+    expect(manifest.repository).toBeUndefined();
+    expect(manifest.interface.websiteURL).toBeUndefined();
     expect(manifest.interface.defaultPrompt[0]).toContain("airgap share");
   });
 
@@ -100,7 +129,25 @@ describe("Codex quick launch", () => {
     expect(skill).toContain("Never create a daemon");
     expect(skill).toContain("Never modify shell startup files");
     expect(skill).toContain("run `airgap share` in a terminal");
+    expect(skill).not.toContain("npx airgap share");
+    expect(skill).toContain("from a trusted local checkout");
+    expect(skill).toContain("npm run build && npm link");
+    expect(skill).toContain("then retry `airgap share`");
     expect(metadata).toContain('display_name: "airgap Share"');
     expect(metadata).toContain("$airgap-share");
+  });
+
+  it("discovers only airgap-share with narrow bilingual triggers", async () => {
+    const skills = await readdir(path.join(root, "plugins/airgap/skills"));
+    expect(skills.sort()).toEqual(["airgap-share"]);
+
+    const skill = await readRepoFile("plugins/airgap/skills/airgap-share/SKILL.md");
+    const description = skill.match(/^description: (.+)$/m)?.[1] ?? "";
+    expect(description).toMatch(
+      /^Open airgap's local picker for the current Claude or Codex coding conversation when/,
+    );
+    expect(description).toContain("share this coding session");
+    expect(description).toContain("分享这段会话");
+    expect(description).toContain("Do not use for generic file, link, or social sharing");
   });
 });

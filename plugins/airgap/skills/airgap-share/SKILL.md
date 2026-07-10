@@ -1,6 +1,6 @@
 ---
 name: airgap-share
-description: Launch airgap's local session picker when the user explicitly asks to open airgap share, share selected turns from a Claude or Codex coding session, 打开 airgap 分享页, or 分享这段 AI 编码会话. Do not trigger for generic uses of “share” that do not mention an AI coding session or airgap.
+description: Open airgap's local picker for the current Claude or Codex coding conversation when the user asks to "share this coding session", "open airgap share", "分享这段会话", or "打开 airgap 分享页". Do not use for generic file, link, or social sharing.
 ---
 
 # Airgap Share
@@ -14,7 +14,7 @@ Open the picker in one step while keeping the process local and temporary.
 3. Return the clickable URL. Say that the browser normally opens automatically and that **完成关闭** or ten minutes without requests stops the process.
 4. Do not report success before a usable localhost URL appears.
 
-If `airgap` is not installed, explain that `npx airgap share` can download the npm package on first use and ask for confirmation before using that fallback. If startup says no local Claude or Codex sessions were found, return that message directly. If browser auto-open fails but startup prints a URL, return the URL for manual opening. If the current surface cannot keep a long-running process alive, tell the user to run `airgap share` in a terminal instead.
+If `airgap` is not installed, tell the user to run `npm run build && npm link` from a trusted local checkout, then retry `airgap share`. If startup says no local Claude or Codex sessions were found, return that message directly. If browser auto-open fails but startup prints a URL, return the URL for manual opening. If the current surface cannot keep a long-running process alive, tell the user to run `airgap share` in a terminal instead.
 
 ## Boundaries
 
