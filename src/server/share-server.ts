@@ -69,6 +69,34 @@ function parseToolDisplay(v: unknown): ToolDisplay {
   return typeof v === "string" && (TOOL_DISPLAYS as readonly string[]).includes(v) ? (v as ToolDisplay) : DEFAULT_TOOL_DISPLAY;
 }
 
+const IDE_CONTEXT_PREFIX = "# Context from my IDE setup:";
+const IDE_REQUEST_MARKER = "\n## My request for Codex:";
+
+/**
+ * IDE 会把活动文件、打开标签页和真实请求合并为一条 Codex user message。
+ * share 的非完整档只展示真实请求；完整档保留原始转录，供需要完整上下文的导出使用。
+ * 未命中完整的已知格式时保持原文，避免误删普通用户消息。
+ */
+function stripIdeContext(userText: string): string {
+  if (!userText.trimStart().startsWith(IDE_CONTEXT_PREFIX)) return userText;
+  const marker = userText.indexOf(IDE_REQUEST_MARKER);
+  if (marker === -1) return userText;
+  const request = userText.slice(marker + IDE_REQUEST_MARKER.length).trim();
+  return request || userText;
+}
+
+/**
+ * 仅 share 的预览与导出根据工具档位裁剪 IDE 注入上下文；CLI show 保持原始会话语义。
+ * 返回新 Turn，不能修改 extractTurns 的结果，以便完整档和后续使用者仍能取得原文。
+ */
+export function shareTurnsForDisplay(turns: Turn[], tools: ToolDisplay): Turn[] {
+  if (tools === "full") return turns;
+  return turns.map((turn) => {
+    const userText = stripIdeContext(turn.userText);
+    return userText === turn.userText ? turn : { ...turn, userText };
+  });
+}
+
 // ---------- 会话读取 ----------
 
 /** 下拉只放最近 limit 个（config: share.sessionListLimit，常用 10/20/50）；更早的用 `airgap share --session <前缀>` 直开。 */
@@ -102,7 +130,7 @@ async function loadDetail(id: string, tools: ToolDisplay): Promise<SessionDetail
   const info = await findSession(id);
   if (!info) return null;
   const records = await readRecords(info.file);
-  const turns = extractTurns(records, info.source);
+  const turns = shareTurnsForDisplay(extractTurns(records, info.source), tools);
   const title = sessionTitle(records, info);
   const lastTs = turns[turns.length - 1]?.timestamp;
   const date = (lastTs ?? new Date(info.mtimeMs).toISOString()).slice(0, 10);
@@ -117,11 +145,15 @@ async function loadDetail(id: string, tools: ToolDisplay): Promise<SessionDetail
   return { id: info.id, source: info.source, cwd: info.cwd, title, date, turns: turnData };
 }
 
-async function selectedTurns(id: string, want: number[]): Promise<{ info: SessionInfo; turns: Turn[]; title: string; date: string } | null> {
+async function selectedTurns(
+  id: string,
+  want: number[],
+  tools: ToolDisplay,
+): Promise<{ info: SessionInfo; turns: Turn[]; title: string; date: string } | null> {
   const info = await findSession(id);
   if (!info) return null;
   const records = await readRecords(info.file);
-  const all = extractTurns(records, info.source);
+  const all = shareTurnsForDisplay(extractTurns(records, info.source), tools);
   const set = new Set(want);
   const turns = all.filter((t) => set.has(t.index));
   const title = sessionTitle(records, info);
@@ -195,10 +227,10 @@ async function renderPng(turns: Turn[], title: string, date: string, tools: Tool
 }
 
 async function handleExport(body: ExportBody): Promise<ExportResult> {
-  const sel = await selectedTurns(body.sessionId, body.turns);
+  const tools = parseToolDisplay(body.tools);
+  const sel = await selectedTurns(body.sessionId, body.turns, tools);
   if (!sel || sel.turns.length === 0) return { ok: false, message: "没有选中任何轮次" };
   const { turns: rawTurns, title, date } = sel;
-  const tools = parseToolDisplay(body.tools);
 
   // 脱敏后导出（UI 默认）：占位符替换，fail-closed 保证干净，无需再拦截。
   // 否则真正渲染前二次复扫——前端 confirm 可被绕过，服务端才是最后一道闸。
