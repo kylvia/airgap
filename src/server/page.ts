@@ -9,6 +9,7 @@ export function renderPage(defaultSession?: string): string {
   const chatCss = JSON.stringify(CHAT_CSS);
   const def = JSON.stringify(defaultSession ?? "");
   const warnMark = '<svg class="wicon" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2 15 14.2H1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.6v3.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.7" r="0.55" fill="currentColor"/></svg>';
+  const refreshMark = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13.2 7.2A5.4 5.4 0 1 0 13 9.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M13.2 3.8v3.5H9.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -29,6 +30,14 @@ ${THEME_CSS}
     background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: 13px; max-width: 340px; transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
   header select:hover { border-color: var(--border-strong); }
   header select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  header #refresh { width: 34px; height: 34px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: var(--radius-input);
+    background: var(--bg); color: var(--fg); cursor: pointer;
+    transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
+  header #refresh:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+  header #refresh:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  header #refresh:disabled { cursor: wait; opacity: 0.48; }
   /* 当前会话 id 胶囊：点击复制 resume 命令 */
   header #sid { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted);
     border: 1px solid var(--border); border-radius: var(--radius-tag); padding: 3px 10px;
@@ -95,6 +104,7 @@ ${THEME_CSS}
     <span class="logo">${airgapMark(20)}<span>airgap</span></span>
     <span style="font-size:13px;color:var(--fg-muted)">分享会话片段</span>
     <select id="sess"></select>
+    <button id="refresh" title="刷新会话数据" aria-label="刷新会话数据">${refreshMark}</button>
     <select id="limit" title="会话下拉列出最近多少条（改动写入 ~/.airgap/config.json）">
       <option value="10">近 10 条</option>
       <option value="20">近 20 条</option>
@@ -180,11 +190,38 @@ let lastListRefresh = 0;
 async function refreshSessions() {
   const q = detail ? "?ensure=" + encodeURIComponent(detail.id) : "";
   const r = await fetch("/api/sessions" + q);
-  if (!r.ok) return;
+  if (!r.ok) return false;
   const data = await r.json();
   fillOptions(data.sessions, detail ? detail.id : null);
   syncLimitSelect(data.limit);
+  return true;
 }
+let manualRefreshInFlight = false;
+async function refreshCurrentSession() {
+  if (manualRefreshInFlight) return;
+  manualRefreshInFlight = true;
+  const button = $("refresh");
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    if (!await refreshSessions()) {
+      setStatus("会话列表刷新失败，请稍后重试。", true);
+      return;
+    }
+    if (!detail) {
+      setStatus("已刷新会话列表。");
+      return;
+    }
+    await loadSession(detail.id, true, "已刷新会话列表和当前会话内容。");
+  } catch {
+    setStatus("会话数据刷新失败，请稍后重试。", true);
+  } finally {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    manualRefreshInFlight = false;
+  }
+}
+$("refresh").onclick = () => { refreshCurrentSession(); };
 // 页面上改条数 = 写回 ~/.airgap/config.json（与配置文件同一真源），成功后按新条数重拉列表。
 $("limit").onchange = async () => {
   const n = Number($("limit").value);
@@ -195,7 +232,7 @@ $("limit").onchange = async () => {
   await refreshSessions();
 };
 window.addEventListener("focus", () => {
-  if (Date.now() - lastListRefresh < 5000) return;
+  if (manualRefreshInFlight || Date.now() - lastListRefresh < 5000) return;
   lastListRefresh = Date.now();
   refreshSessions().catch(() => {});
 });
@@ -208,16 +245,19 @@ function rel(ms) {
 
 function setLoading(on) { $("loading").classList.toggle("on", !!on); }
 
-async function loadSession(id, keepSelection) {
+async function loadSession(id, keepSelection, refreshedStatus) {
   setStatus("加载中…"); setLoading(true);
   try {
     const r = await fetch("/api/session/" + encodeURIComponent(id) + "?tools=" + encodeURIComponent($("tools").value));
-    if (!r.ok) { setStatus("加载失败", true); return; }
+    if (!r.ok) { setStatus("加载失败", true); return false; }
     detail = await r.json();
     if (!keepSelection) {
       selected.clear();
       // 默认勾选真实用户轮（跳过任务通知/命令/系统噪声），用户可再调
       for (const t of detail.turns) if (!t.tag) selected.add(t.index);
+    } else {
+      const available = new Set(detail.turns.map((t) => t.index));
+      for (const index of selected) if (!available.has(index)) selected.delete(index);
     }
     renderList(); buildPreviewShell();
     // 会话 id 胶囊：显示前 8 位，点击复制完整 resume 命令。
@@ -232,10 +272,12 @@ async function loadSession(id, keepSelection) {
       catch { setStatus(cmd); } // 剪贴板不可用就把命令亮在状态栏，手动抄
     };
     setStatus(keepSelection
-      ? "已按新的工具展示级别刷新预览。"
+      ? refreshedStatus || "已按新的工具展示级别刷新预览。"
       : "共 " + detail.turns.length + " 轮，已默认勾选 " + selected.size + " 轮真实对话。");
+    return true;
   } catch {
     setStatus("加载失败（分享服务可能已关闭）", true);
+    return false;
   } finally {
     setLoading(false);
   }
