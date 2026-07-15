@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import type { RuleMatch, SessionInfo, ToolDisplay, Turn } from "../types.js";
 import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "../types.js";
-import { loadConfig, sessionListLimit, updateSessionListLimit } from "../config.js";
+import { loadConfig, sessionListLimit, shareToolDisplay, updateShareConfig } from "../config.js";
 import { discoverSessions } from "../discovery.js";
 import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
@@ -17,6 +17,9 @@ import { oneLine, peekTitle, pickSession, readRecords, redactTurns, scanOneTurn,
 import { renderPage } from "./page.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
+
+// 复制到系统剪贴板走 osascript/pbcopy，只有 macOS 支持；页面据此把「下载 PNG」设为非 mac 的主按钮。
+const isMac = process.platform === "darwin";
 
 // ---------- API 数据形态 ----------
 
@@ -245,11 +248,10 @@ async function handleExport(body: ExportBody): Promise<ExportResult> {
     if (blockReason) return { ok: false, blocked: true, message: blockReason };
   }
 
-  const isMac = process.platform === "darwin";
-
   // 存桌面：png / html / md 三格式
   if (body.action === "save") {
-    const desktop = path.join(os.homedir(), "Desktop");
+    // 本地化的 Linux 桌面（如 ~/桌面）会导出到 user-dirs.dirs 里的 XDG_DESKTOP_DIR；未设置时兜底 ~/Desktop。
+    const desktop = process.env["XDG_DESKTOP_DIR"] || path.join(os.homedir(), "Desktop");
     await mkdir(desktop, { recursive: true });
     const outPath = path.join(desktop, `airgap-share-${stamp()}.${body.format}`);
     if (body.format === "png") {
@@ -274,11 +276,11 @@ async function handleExport(body: ExportBody): Promise<ExportResult> {
     if (!isMac) return { ok: false, message: "复制到剪贴板目前仅 macOS 支持，请改用「下载」或「存桌面」。" };
     if (body.format === "md") {
       await run("pbcopy", [], renderMarkdown(turns, { title, date }, { tools }));
-      return { ok: true, message: `Markdown 已复制到剪贴板${redactNote}，去微信/公众号 Cmd-V 粘贴。` };
+      return { ok: true, message: `Markdown 已复制到剪贴板${redactNote}，Cmd-V 粘贴。` };
     }
     const png = await renderPng(turns, title, date, tools);
     await pngToClipboard(png);
-    return { ok: true, message: `长图已复制到剪贴板${redactNote}，切到微信选好聊天，Cmd-V 粘贴发送。` };
+    return { ok: true, message: `长图已复制到剪贴板${redactNote}，Cmd-V 粘贴。` };
   }
 
   return { ok: false, message: "未知操作" };
@@ -310,8 +312,10 @@ export interface ShareServer {
 }
 
 export async function startShareServer(opts: { port?: number; defaultSession?: string }): Promise<ShareServer> {
-  // 启动时读 config；页面上的条数选择器经 POST /api/config 持久化并即时更新这里
-  let listLimit = sessionListLimit(await loadConfig());
+  // 启动时读 config；页面设置面板经 POST /api/config 持久化并即时更新这里
+  const bootCfg = await loadConfig();
+  let listLimit = sessionListLimit(bootCfg);
+  let toolDisplay = shareToolDisplay(bootCfg);
   let idleTimer: NodeJS.Timeout;
   const touch = (): void => {
     clearTimeout(idleTimer);
@@ -335,7 +339,7 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
     const p = url.pathname;
 
     if (req.method === "GET" && p === "/") {
-      const html = renderPage(opts.defaultSession);
+      const html = renderPage(opts.defaultSession, toolDisplay, isMac);
       const buf = Buffer.from(html, "utf8");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-length": buf.length });
       res.end(buf);
@@ -348,15 +352,31 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
       return;
     }
     if (req.method === "POST" && p === "/api/config") {
-      const body = JSON.parse(await readBody(req)) as { sessionListLimit?: unknown };
-      const n = body.sessionListLimit;
-      if (typeof n !== "number" || !Number.isInteger(n)) {
-        sendJson(res, 400, { ok: false, message: "sessionListLimit 需要整数" });
+      const body = JSON.parse(await readBody(req)) as { sessionListLimit?: unknown; toolDisplay?: unknown };
+      const patch: { sessionListLimit?: number; toolDisplay?: ToolDisplay } = {};
+      if (body.sessionListLimit !== undefined) {
+        if (typeof body.sessionListLimit !== "number" || !Number.isInteger(body.sessionListLimit)) {
+          sendJson(res, 400, { ok: false, message: "sessionListLimit 需要整数" });
+          return;
+        }
+        patch.sessionListLimit = body.sessionListLimit;
+      }
+      if (body.toolDisplay !== undefined) {
+        if (typeof body.toolDisplay !== "string" || !(TOOL_DISPLAYS as readonly string[]).includes(body.toolDisplay)) {
+          sendJson(res, 400, { ok: false, message: `toolDisplay 只接受 ${TOOL_DISPLAYS.join(" | ")}` });
+          return;
+        }
+        patch.toolDisplay = body.toolDisplay as ToolDisplay;
+      }
+      if (patch.sessionListLimit === undefined && patch.toolDisplay === undefined) {
+        sendJson(res, 400, { ok: false, message: "没有可保存的配置项" });
         return;
       }
       try {
-        listLimit = await updateSessionListLimit(n);
-        sendJson(res, 200, { ok: true, limit: listLimit });
+        const saved = await updateShareConfig(patch);
+        listLimit = saved.sessionListLimit;
+        toolDisplay = saved.toolDisplay;
+        sendJson(res, 200, { ok: true, limit: listLimit, toolDisplay });
       } catch (err) {
         sendJson(res, 500, { ok: false, message: err instanceof Error ? err.message : String(err) });
       }

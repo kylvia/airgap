@@ -2,7 +2,14 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_SESSION_LIST_LIMIT, loadConfig, sessionListLimit, updateSessionListLimit } from "../src/config.js";
+import {
+  DEFAULT_SESSION_LIST_LIMIT,
+  loadConfig,
+  sessionListLimit,
+  shareToolDisplay,
+  updateShareConfig,
+} from "../src/config.js";
+import { DEFAULT_TOOL_DISPLAY } from "../src/types.js";
 
 let tmpHome: string | null = null;
 
@@ -54,16 +61,16 @@ describe("loadConfig (~/.airgap/config.json)", () => {
   });
 });
 
-describe("updateSessionListLimit (share UI 条数选择器的持久化)", () => {
-  it("目录/文件不存在时创建并写入，返回 clamp 后的值", async () => {
+describe("updateShareConfig (share UI 设置面板的持久化)", () => {
+  it("目录/文件不存在时创建并写入，返回生效值", async () => {
     const home = await homeWith(null);
-    expect(await updateSessionListLimit(20, home)).toBe(20);
+    expect((await updateShareConfig({ sessionListLimit: 20 }, home)).sessionListLimit).toBe(20);
     expect(sessionListLimit(await loadConfig(home))).toBe(20);
   });
 
-  it("只动 share.sessionListLimit，文件里的未知键原样保留", async () => {
+  it("只动 patch 里的键，文件里的未知键原样保留", async () => {
     const home = await homeWith('{"future":{"x":1},"share":{"sessionListLimit":50,"other":"keep"}}');
-    await updateSessionListLimit(10, home);
+    await updateShareConfig({ sessionListLimit: 10 }, home);
     const raw = JSON.parse(
       await readFile(path.join(home, ".airgap", "config.json"), "utf8"),
     ) as Record<string, unknown>;
@@ -73,13 +80,36 @@ describe("updateSessionListLimit (share UI 条数选择器的持久化)", () => 
 
   it("config.json 存在但损坏 → 拒绝覆盖并抛错，原文件内容不动", async () => {
     const home = await homeWith("{ broken");
-    await expect(updateSessionListLimit(10, home)).rejects.toThrow(/无法解析/);
+    await expect(updateShareConfig({ sessionListLimit: 10 }, home)).rejects.toThrow(/无法解析/);
     expect(await readFile(path.join(home, ".airgap", "config.json"), "utf8")).toBe("{ broken");
   });
 
-  it("非整数入参抛错；越界整数 clamp 后写入", async () => {
+  it("非整数 limit / 非法 toolDisplay 抛错；越界整数 clamp 后写入", async () => {
     const home = await homeWith(null);
-    await expect(updateSessionListLimit(10.5, home)).rejects.toThrow(/整数/);
-    expect(await updateSessionListLimit(500, home)).toBe(200);
+    await expect(updateShareConfig({ sessionListLimit: 10.5 }, home)).rejects.toThrow(/整数/);
+    await expect(updateShareConfig({ toolDisplay: "bogus" as never }, home)).rejects.toThrow(/toolDisplay/);
+    expect((await updateShareConfig({ sessionListLimit: 500 }, home)).sessionListLimit).toBe(200);
+  });
+
+  it("toolDisplay 单写不动已有 limit；双键同写都落盘", async () => {
+    const home = await homeWith('{"share":{"sessionListLimit":10}}');
+    expect(await updateShareConfig({ toolDisplay: "none" }, home)).toEqual({ sessionListLimit: 10, toolDisplay: "none" });
+    expect(await updateShareConfig({ sessionListLimit: 50, toolDisplay: "full" }, home)).toEqual({
+      sessionListLimit: 50,
+      toolDisplay: "full",
+    });
+    const cfg = await loadConfig(home);
+    expect(sessionListLimit(cfg)).toBe(50);
+    expect(shareToolDisplay(cfg)).toBe("full");
+  });
+});
+
+describe("share.toolDisplay 加载", () => {
+  it("合法值生效，非法值静默回退默认", async () => {
+    expect(shareToolDisplay(await loadConfig(await homeWith('{"share":{"toolDisplay":"full"}}')))).toBe("full");
+    expect(shareToolDisplay(await loadConfig(await homeWith('{"share":{"toolDisplay":"bogus"}}')))).toBe(
+      DEFAULT_TOOL_DISPLAY,
+    );
+    expect(shareToolDisplay(await loadConfig(await homeWith(null)))).toBe(DEFAULT_TOOL_DISPLAY);
   });
 });

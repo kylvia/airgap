@@ -58,7 +58,7 @@ describe("renderPage (share picker shell)", () => {
   });
 
   it("关键 DOM/JS 锚点齐全（design.md 清单）", () => {
-    for (const id of ["sess", "sbanner", "list", "preview", "status", "count", "all", "none", "done", "tools", "redact", "loading", "limit", "sid"]) {
+    for (const id of ["sess", "sbanner", "list", "preview", "status", "count", "all", "none", "done", "tools", "redact", "loading", "limit", "sid", "prefs", "prefpanel"]) {
       expect(page).toContain(`id="${id}"`);
     }
     expect(page).toContain('data-a="clipboard"');
@@ -68,5 +68,23 @@ describe("renderPage (share picker shell)", () => {
     expect(page).not.toContain("backdrop-filter");
     expect(page).toContain("var(--bg-subtle)");
     expect(page).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+  });
+});
+
+describe("renderPage 平台适配：复制到剪贴板只有 macOS 支持", () => {
+  it("mac 上「复制长图」是主按钮，且不带 mac-only 提示", () => {
+    const page = renderPage(undefined, "summary", true);
+    expect(page).toMatch(/<button class="primary" data-a="clipboard" data-f="png"[^>]*>复制长图<\/button>/);
+    expect(page).toContain('<button data-a="download" data-f="png">下载 PNG</button>');
+    expect(page).toContain("点「复制长图」→ Cmd-V 粘贴");
+  });
+
+  it("非 mac 上「下载 PNG」变主按钮，剪贴板按钮降级并带 mac-only 提示，引导文案不再提 Cmd-V", () => {
+    const page = renderPage(undefined, "summary", false);
+    expect(page).toContain('<button class="primary" data-a="download" data-f="png">下载 PNG</button>');
+    expect(page).toMatch(/<button data-a="clipboard" data-f="png" title="[^"]*macOS[^"]*"[^>]*>复制长图<\/button>/);
+    expect(page).toMatch(/<button data-a="clipboard" data-f="md" title="[^"]*macOS[^"]*"[^>]*>复制 Markdown<\/button>/);
+    expect(page).not.toContain("Cmd-V");
+    expect(page).toContain("点「下载 PNG」保存图片");
   });
 });

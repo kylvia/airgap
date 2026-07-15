@@ -119,7 +119,7 @@ airgap share
 alias ags='airgap share'
 ```
 
-也可以让 Raycast、Alfred 或 macOS 快捷指令把个人快捷键绑定到同一个 `airgap share` 命令。常驻的是你已有的启动器，不是 airgap。
+也可以让 Raycast、Alfred、macOS 快捷指令（Windows 上的 PowerToys Run / AutoHotkey，Linux 上桌面环境自带的自定义快捷键设置）把个人快捷键绑定到同一个 `airgap share` 命令。常驻的是你已有的启动器，不是 airgap。
 
 ## 把几轮对话出成图 —— show
 

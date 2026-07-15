@@ -119,7 +119,7 @@ For a shorter terminal command, add your own alias (airgap never edits shell fil
 alias ags='airgap share'
 ```
 
-Raycast, Alfred, or macOS Shortcuts can optionally bind a personal hotkey to the same `airgap share` command. The launcher may stay resident, but airgap does not.
+Raycast, Alfred, or macOS Shortcuts (Windows: PowerToys Run / AutoHotkey; Linux: your desktop environment's own custom-shortcut settings) can optionally bind a personal hotkey to the same `airgap share` command. The launcher may stay resident, but airgap does not.
 
 ## Turn a few turns into a shareable image — `show`
 

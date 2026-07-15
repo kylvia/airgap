@@ -4,12 +4,25 @@ import { THEME_CSS } from "../render/theme.js";
 /**
  * 交互页：左勾选、右实时预览（隔离在 iframe 里，聊天 CSS 不污染 app 外壳）、
  * 底部发送按钮。所有会话数据经 /api 拉取，页面零外链。
+ * toolDisplay 是 config 里的工具展示档，服务端注入 select 初始选中（首屏即生效值，无闪变）。
+ * isMac：复制到剪贴板走 osascript/pbcopy，只有 macOS 支持——非 mac 时把跨平台的「下载 PNG」
+ * 设为主按钮，剪贴板按钮降级为次要并加提示，避免非 mac 用户点最显眼的按钮先撞一次失败。
  */
-export function renderPage(defaultSession?: string): string {
+export function renderPage(defaultSession?: string, toolDisplay = "summary", isMac = true): string {
   const chatCss = JSON.stringify(CHAT_CSS);
   const def = JSON.stringify(defaultSession ?? "");
+  const primaryCls = (on: boolean): string => (on ? ' class="primary"' : "");
+  const clipboardHint = isMac ? "" : ' title="复制到剪贴板目前仅 macOS 支持，请用「下载 PNG」"';
+  const statusHint = isMac
+    ? "默认「脱敏后导出」。勾选轮次 → 右侧预览 → 点「复制长图」→ Cmd-V 粘贴。"
+    : "默认「脱敏后导出」。勾选轮次 → 右侧预览 → 点「下载 PNG」保存图片。";
   const warnMark = '<svg class="wicon" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2 15 14.2H1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.6v3.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.7" r="0.55" fill="currentColor"/></svg>';
   const refreshMark = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13.2 7.2A5.4 5.4 0 1 0 13 9.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M13.2 3.8v3.5H9.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  // 设置入口的滑杆图标（inline SVG，零 emoji）
+  const prefsMark = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="10.5" cy="4.5" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/><circle cx="5.5" cy="8" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="11.5" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/></svg>';
+  const toolsOptions = (["none", "summary", "full"] as const)
+    .map((v) => `<option value="${v}"${v === toolDisplay ? " selected" : ""}>${{ none: "隐藏", summary: "摘要", full: "完整" }[v]}</option>`)
+    .join("");
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -44,6 +57,21 @@ ${THEME_CSS}
     cursor: pointer; user-select: none; white-space: nowrap;
     transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
   header #sid:hover { color: var(--fg); border-color: var(--border-strong); }
+  /* 设置入口 + popover：实色 paper 面板（铁律禁半透明材质），hairline 边框方角卡片 */
+  header #prefs { margin-left: auto; width: 34px; height: 34px; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: var(--radius-input);
+    background: var(--bg); color: var(--fg); cursor: pointer;
+    transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
+  header #prefs:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+  header #prefs:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #prefpanel { position: absolute; top: calc(100% + 8px); right: 20px; z-index: 20; min-width: 250px;
+    background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-card);
+    padding: 6px 14px; }
+  #prefpanel[hidden] { display: none; }
+  #prefpanel .prow { display: flex; align-items: center; justify-content: space-between; gap: 18px;
+    padding: 9px 0; font-size: 13px; color: var(--fg); }
+  #prefpanel .prow + .prow { border-top: 1px solid var(--border-subtle); }
   main { flex: 1; display: flex; min-height: 0; position: relative; }
   /* 切换会话/展示级别时盖住内容区：实色纸面（铁律禁半透明材质），品牌 mark 两块交替脉动。
      显隐用 display 硬切（不过渡 opacity/visibility）：headless 截图合成对这类过渡不可靠，且遮罩不需要淡入。 */
@@ -90,10 +118,6 @@ ${THEME_CSS}
   footer button.primary:hover { background: var(--btn-primary-hover); border-color: var(--btn-primary-hover); }
   footer .rdct { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); cursor: pointer; user-select: none; white-space: nowrap; }
   footer .rdct input { accent-color: var(--fg); cursor: pointer; }
-  footer select { height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-input);
-    background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: 13px; cursor: pointer; }
-  footer select:hover { border-color: var(--border-strong); }
-  footer select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   footer .status { flex: 1; font-size: 13px; color: var(--fg-muted); min-width: 200px; }
   footer .status.err { color: var(--danger); }
   .sbanner { background: var(--warning-bg); color: var(--warning-fg); font-size: 12.5px; padding: 8px 18px; border-bottom: 1px solid var(--warning); display: none; align-items: center; gap: 7px; }
@@ -105,12 +129,16 @@ ${THEME_CSS}
     <span style="font-size:13px;color:var(--fg-muted)">分享会话片段</span>
     <select id="sess"></select>
     <button id="refresh" title="刷新会话数据" aria-label="刷新会话数据">${refreshMark}</button>
-    <select id="limit" title="会话下拉列出最近多少条（改动写入 ~/.airgap/config.json）">
-      <option value="10">近 10 条</option>
-      <option value="20">近 20 条</option>
-      <option value="50">近 50 条</option>
-    </select>
     <span id="sid" style="display:none" title="点击复制 resume 命令（含完整会话 id）"></span>
+    <button id="prefs" title="设置（写入 ~/.airgap/config.json）" aria-label="设置">${prefsMark}</button>
+    <div id="prefpanel" hidden>
+      <div class="prow"><span>会话列表</span><select id="limit">
+        <option value="10">近 10 条</option>
+        <option value="20">近 20 条</option>
+        <option value="50">近 50 条</option>
+      </select></div>
+      <div class="prow"><span>工具展示</span><select id="tools">${toolsOptions}</select></div>
+    </div>
   </header>
   <div class="sbanner" id="sbanner"></div>
   <main>
@@ -125,17 +153,12 @@ ${THEME_CSS}
     <div class="right"><iframe id="preview"></iframe></div>
   </main>
   <footer>
-    <label class="rdct" title="工具调用的展示密度：隐藏 / 一行摘要 / 完整卡片（预览与导出一致）">工具<select id="tools">
-      <option value="none">隐藏</option>
-      <option value="summary" selected>摘要</option>
-      <option value="full">完整</option>
-    </select></label>
     <label class="rdct" title="导出前把检测到的密钥替换成占位符（推荐默认开）"><input type="checkbox" id="redact" checked>脱敏后导出</label>
-    <button class="primary" data-a="clipboard" data-f="png">复制长图</button>
-    <button data-a="download" data-f="png">下载 PNG</button>
-    <button data-a="clipboard" data-f="md">复制 Markdown</button>
+    <button${primaryCls(isMac)} data-a="clipboard" data-f="png"${clipboardHint}>复制长图</button>
+    <button${primaryCls(!isMac)} data-a="download" data-f="png">下载 PNG</button>
+    <button data-a="clipboard" data-f="md"${clipboardHint}>复制 Markdown</button>
     <button data-a="save" data-f="png">存桌面</button>
-    <span class="status" id="status">默认「脱敏后导出」。勾选轮次 → 右侧预览 → 点「复制长图」→ 切微信 Cmd-V 粘贴。</span>
+    <span class="status" id="status">${statusHint}</span>
     <button id="done">完成关闭</button>
   </footer>
 <script>
@@ -388,8 +411,19 @@ for (const btn of document.querySelectorAll("footer button[data-a]")) {
 }
 $("all").onclick = () => { for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
 $("none").onclick = () => { selected.clear(); renderList(); updateCount(); syncPreview(null); };
-// 切换工具展示级别：服务端按新级别重渲各轮片段（预览=导出，物理裁剪而非 CSS 隐藏），保留已勾选轮次。
-$("tools").onchange = () => { if (detail) loadSession(detail.id, true); };
+// 设置面板开关：点按钮 toggle；点面板外或按 Esc 关闭（面板内点击冒泡到 document 时被 contains 放行）。
+$("prefs").onclick = (e) => { e.stopPropagation(); const p = $("prefpanel"); p.hidden = !p.hidden; };
+document.addEventListener("click", (e) => { const p = $("prefpanel"); if (!p.hidden && !p.contains(e.target)) p.hidden = true; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("prefpanel").hidden = true; });
+// 切换工具展示级别：服务端按新级别重渲各轮片段（预览=导出，物理裁剪而非 CSS 隐藏），保留已勾选轮次；
+// 同时静默持久化到 config.json——先等预览刷新（用户在等它），保存失败的提示最后落地不被刷新提示覆盖。
+$("tools").onchange = async () => {
+  const save = fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ toolDisplay: $("tools").value }) })
+    .then((r) => r.json()).catch(() => ({ ok: false, message: "工具展示偏好保存失败" }));
+  if (detail) await loadSession(detail.id, true);
+  const res = await save;
+  if (!res.ok) setStatus(res.message || "工具展示偏好保存失败", true);
+};
 $("done").onclick = async () => { await fetch("/api/close", { method: "POST" }); setStatus("已关闭，可以关掉这个标签页了。"); };
 
 loadSessions();

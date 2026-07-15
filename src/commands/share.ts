@@ -42,7 +42,8 @@ export async function runShare(opts: ShareOpts): Promise<void> {
 
   console.log(`${pc.green("✔")} airgap share 已启动：${pc.bold(server.url)}`);
   console.log(pc.dim("  浏览器会自动打开；没弹出就手动点上面的地址。"));
-  console.log(pc.dim("  勾选轮次 → 右侧预览 → 复制长图/存桌面；用完点页面「完成关闭」，或 10 分钟空闲自动退出。"));
+  const exportTip = process.platform === "darwin" ? "复制长图/存桌面" : "下载 PNG/存桌面";
+  console.log(pc.dim(`  勾选轮次 → 右侧预览 → ${exportTip}；用完点页面「完成关闭」，或 10 分钟空闲自动退出。`));
 
   if (opts.open !== false) openBrowser(server.url);
 }
