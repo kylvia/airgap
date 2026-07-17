@@ -6,5 +6,9 @@ dist/
 .superpowers/
 .agents/
 skills-lock.json
+
+# 内部开发账本 / 计划文档：本地保留，不进公开 repo
+/STATUS.md
+/docs/superpowers/
 !/test/fixtures/home/.claude/
 !/test/fixtures/home/.claude/**

@@ -30,7 +30,7 @@ npx airgap scan
 就这一行。scan 会遍历 `~/.claude` 和 `~/.codex`，把每个 JSONL 会话流式过一遍检测器，按项目打一张表：这些文件一旦被分享或同步出去，会漏什么。
 
 ```
-airgap scan: scanning 1216 sessions...
+airgap scan: scanning ~1,200 sessions...
 airgap scan: done in 48.2s
 
 PROJECT                         SESSIONS   CRITICAL  HIGH  MEDIUM  OLDEST
@@ -40,7 +40,7 @@ PROJECT                         SESSIONS   CRITICAL  HIGH  MEDIUM  OLDEST
 ~/dotfiles                      2/6        1         4     9       402d
 ...
 
-⚠ 680 of 1216 sessions contain plaintext secrets that would leak if shared or synced.
+⚠ ~680 of ~1,200 sessions contain plaintext secrets that would leak if shared or synced.
 ```
 
 *（示例输出，数字每台机器都不一样——想看你自己的，跑一下就知道了。）*
