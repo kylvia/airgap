@@ -4,6 +4,7 @@
 
 **Scan your AI coding sessions for leaked secrets. Then carry them anywhere — no cloud, no accounts.**
 
+[![npm version](https://img.shields.io/npm/v/airgap.svg)](https://www.npmjs.com/package/airgap)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 English · [简体中文](./README.zh-CN.md)
@@ -21,8 +22,6 @@ Your `~/.claude` and `~/.codex` folders are full of plaintext transcripts — an
 Everything runs on your machine. No account, no upload, no telemetry.
 
 ## Quick start
-
-> **Not published to npm yet.** For now, build from source — `npm run build && npm link` — then run the `airgap …` commands below without the `npx` prefix. Once it's on npm, `npx airgap …` works exactly as written.
 
 ```sh
 npx airgap scan

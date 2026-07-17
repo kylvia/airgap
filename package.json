@@ -11,6 +11,14 @@
     "handoff"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kylvia/airgap.git"
+  },
+  "homepage": "https://github.com/kylvia/airgap#readme",
+  "bugs": {
+    "url": "https://github.com/kylvia/airgap/issues"
+  },
   "type": "module",
   "bin": {
     "airgap": "./dist/index.js"
