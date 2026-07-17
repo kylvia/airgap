@@ -4,7 +4,6 @@
 
 **先扫一遍你的 AI 编码会话里漏了多少明文密钥，再把会话搬到任何一台机器上继续——不上云、不要账号。**
 
-[![npm version](https://img.shields.io/npm/v/airgap.svg)](https://www.npmjs.com/package/airgap)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 [English](./README.md) · 简体中文
@@ -22,6 +21,8 @@
 全程在你本机跑。不登录、不上传、不埋点。
 
 ## 快速开始
+
+> **尚未发布到 npm。** 目前请先从源码构建——`npm run build && npm link`——然后把下面的 `npx airgap …` 命令去掉 `npx`、直接用 `airgap …` 跑。发布到 npm 后，`npx airgap …` 即可照写生效。
 
 ```sh
 npx airgap scan
