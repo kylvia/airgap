@@ -125,6 +125,8 @@ To persist the preference, add a top-level language setting:
 
 An automatically detected language is used for that run and is never written to the config file. Run `airgap doctor` to see the language source, detected locale, and final resolved locale.
 
+The Share settings panel can switch between **Follow system**, **Simplified Chinese**, and **English**. A successful change is saved to `~/.airgap/config.json` and reloads the current Share page immediately. `--lang` and `AIRGAP_LANG` still take priority on the next launch.
+
 With the [local assistant plugin](./plugins/airgap/README.md) installed, an AI coding conversation becomes a one-step entry point:
 
 - Claude Code: `/airgap:share`

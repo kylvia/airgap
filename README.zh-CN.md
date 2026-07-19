@@ -125,6 +125,8 @@ AIRGAP_LANG=en airgap share
 
 自动探测结果只对本次运行生效，不会写入配置文件。运行 `airgap doctor` 可查看语言来源、检测语言和最终语言。
 
+Share 设置面板可在**跟随系统 / 简体中文 / 英文**之间切换。保存成功后会写入 `~/.airgap/config.json`，并立即刷新当前 Share 页面；下次启动时，`--lang` 和 `AIRGAP_LANG` 仍保持更高优先级。
+
 安装[本地助手插件](./plugins/airgap/README.md)后，在 AI 编码对话里也能一步唤起：
 
 - Claude Code：`/airgap:share`

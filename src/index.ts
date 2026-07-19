@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   registerPack(program);
   registerOpen(program);
   registerShow(program);
-  registerShare(program, i18n);
+  registerShare(program, i18n, language);
   registerDoctor(program, language, i18n);
 
   await program.parseAsync(process.argv);

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createI18n } from "../src/i18n/index.js";
 import { extractLangArg } from "../src/cli.js";
-import { shareStartupLines } from "../src/commands/share.js";
+import { shareLanguageOptions, shareStartupLines } from "../src/commands/share.js";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const shareModuleUrl = new URL("../src/commands/share.ts", import.meta.url).href;
@@ -26,6 +26,19 @@ describe("share command", () => {
     expect(shareStartupLines(createI18n("zh-CN"), false, "http://localhost:1/").join("\n")).toContain(
       "勾选轮次",
     );
+  });
+
+  it("passes the resolved locale and its preference source into Share", () => {
+    expect(
+      shareLanguageOptions({
+        locale: "zh-CN",
+        source: "macOS AppleLanguages",
+        detectedLocale: "zh-Hans-CN",
+      }),
+    ).toEqual({ locale: "zh-CN", languagePreference: "auto" });
+    expect(
+      shareLanguageOptions({ locale: "en", source: "AIRGAP_LANG", detectedLocale: "en" }),
+    ).toEqual({ locale: "en", languagePreference: "en" });
   });
 
   it("localizes the real Commander share help", () => {

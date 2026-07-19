@@ -4,7 +4,14 @@ import pc from "picocolors";
 import { discoverSessions } from "../discovery.js";
 import { pickSession } from "../session.js";
 import { startShareServer } from "../server/share-server.js";
-import { createI18n, type I18n } from "../i18n/index.js";
+import {
+  createI18n,
+  languagePreferenceFromSelection,
+  type I18n,
+  type LanguagePreference,
+  type Locale,
+  type LocaleSelection,
+} from "../i18n/index.js";
 
 interface ShareOpts {
   session?: string;
@@ -33,7 +40,25 @@ export function shareStartupLines(i18n: I18n, isMac: boolean, url: string): stri
   ];
 }
 
-export async function runShare(opts: ShareOpts, i18n: I18n = createI18n("zh-CN")): Promise<void> {
+export function shareLanguageOptions(selection: LocaleSelection): {
+  locale: Locale;
+  languagePreference: LanguagePreference;
+} {
+  return {
+    locale: selection.locale,
+    languagePreference: languagePreferenceFromSelection(selection),
+  };
+}
+
+export async function runShare(
+  opts: ShareOpts,
+  i18n: I18n = createI18n("zh-CN"),
+  selection: LocaleSelection = {
+    locale: i18n.locale,
+    source: "config.language",
+    detectedLocale: i18n.locale,
+  },
+): Promise<void> {
   // 默认会话：--session 前缀 > cwd 对应 > 全局最近
   const sessions = await discoverSessions({});
   if (sessions.length === 0) {
@@ -47,7 +72,7 @@ export async function runShare(opts: ShareOpts, i18n: I18n = createI18n("zh-CN")
   const server = await startShareServer({
     port: port && Number.isInteger(port) ? port : undefined,
     defaultSession: def?.id,
-    locale: i18n.locale,
+    ...shareLanguageOptions(selection),
   });
 
   const [started, ...guidance] = shareStartupLines(i18n, process.platform === "darwin", server.url);
@@ -57,7 +82,15 @@ export async function runShare(opts: ShareOpts, i18n: I18n = createI18n("zh-CN")
   if (opts.open !== false) openBrowser(server.url);
 }
 
-export function registerShare(program: Command, i18n: I18n = createI18n("zh-CN")): void {
+export function registerShare(
+  program: Command,
+  i18n: I18n = createI18n("zh-CN"),
+  selection: LocaleSelection = {
+    locale: i18n.locale,
+    source: "config.language",
+    detectedLocale: i18n.locale,
+  },
+): void {
   const command = program
     .command("share")
     .description(i18n.t("share.command.description"))
@@ -67,7 +100,7 @@ export function registerShare(program: Command, i18n: I18n = createI18n("zh-CN")
     .helpOption("-h, --help", i18n.t("share.command.helpOption"))
     .action(async (opts: ShareOpts) => {
       try {
-        await runShare(opts, i18n);
+        await runShare(opts, i18n, selection);
       } catch (err) {
         console.error(pc.red(err instanceof Error ? err.message : String(err)));
         process.exitCode = 1;
