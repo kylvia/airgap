@@ -10,6 +10,7 @@ import { shareStartupLines } from "../src/commands/share.js";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const shareModuleUrl = new URL("../src/commands/share.ts", import.meta.url).href;
 const tsxCli = createRequire(import.meta.url).resolve("tsx/cli");
+const indexFile = path.join(root, "src/index.ts");
 
 describe("share command", () => {
   it("extracts global language options before Commander builds localized help", () => {
@@ -25,6 +26,18 @@ describe("share command", () => {
     expect(shareStartupLines(createI18n("zh-CN"), false, "http://localhost:1/").join("\n")).toContain(
       "勾选轮次",
     );
+  });
+
+  it("localizes the real Commander share help", () => {
+    const result = spawnSync(process.execPath, [tsxCli, indexFile, "--lang", "zh-CN", "share", "--help"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("用法：");
+    expect(result.stdout).toContain("选项：");
+    expect(result.stdout).toContain("打开本地网页");
+    expect(result.stdout).not.toContain("Open a local web UI");
   });
 
   it("keeps running when the browser launcher emits an asynchronous error", () => {

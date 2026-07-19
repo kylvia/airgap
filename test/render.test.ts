@@ -145,6 +145,13 @@ describe("renderHtml", () => {
 });
 
 describe("bilingual Share exports", () => {
+  it("does not mutate transcript data while rendering either format", () => {
+    const before = structuredClone(turns);
+    renderHtml(turns, meta, { locale: "en" });
+    renderMarkdown(turns, meta, { locale: "zh-CN" });
+    expect(turns).toEqual(before);
+  });
+
   it("renders English HTML chrome without changing transcript content", () => {
     const html = renderHtml(turns, meta, { locale: "en" });
     expect(html).toContain('<html lang="en">');

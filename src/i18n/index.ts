@@ -11,7 +11,11 @@ export function createI18n(locale: Locale): I18n {
   return {
     locale,
     t(key: string, params: MessageParams = {}): string {
-      const template = catalog[key] ?? fallbackCatalog[key];
+      const singularKey = params["count"] === 1 ? `${key}.one` : undefined;
+      const template =
+        (singularKey ? catalog[singularKey] ?? fallbackCatalog[singularKey] : undefined) ??
+        catalog[key] ??
+        fallbackCatalog[key];
       if (template === undefined) throw new Error(`Unknown message key: ${key}`);
       return template.replace(/\{(\w+)\}/g, (match: string, name: string) =>
         Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match,

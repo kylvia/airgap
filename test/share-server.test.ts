@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RuleMatch, Turn } from "../src/types.js";
-import { exportBlockReason } from "../src/server/share-server.js";
+import { exportBlockReason, startShareServer } from "../src/server/share-server.js";
 import { renderPage, serializeForScript } from "../src/server/page.js";
 
 const scan = (s: string): RuleMatch[] =>
@@ -44,7 +44,7 @@ describe("exportBlockReason (share server-side export gate)", () => {
   });
 
   it("localizes the server-side risk response", () => {
-    expect(exportBlockReason([toolTurn("result")], false, scan, "en")).toMatch(/possible secrets/i);
+    expect(exportBlockReason([toolTurn("result")], false, scan, "en")).toMatch(/1 possible secret\b/i);
   });
 });
 
@@ -89,6 +89,23 @@ describe("renderPage internationalization", () => {
   it("escapes strings before embedding them in an inline script", () => {
     expect(serializeForScript({ value: "</script><script>alert(1)</script>" })).not.toContain("</script>");
     expect(serializeForScript({ value: "</script>" })).toContain("\\u003c/script>");
+  });
+});
+
+describe("Share server locale wiring", () => {
+  it("serves the resolved locale and stable localized API errors", async () => {
+    const server = await startShareServer({ locale: "en" });
+    try {
+      const page = await fetch(server.url).then((response) => response.text());
+      expect(page).toContain('<html lang="en">');
+      expect(page).toContain("Share session turns");
+
+      const response = await fetch(new URL("/missing", server.url));
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({ code: "NOT_FOUND", message: "Not found" });
+    } finally {
+      server.close();
+    }
   });
 });
 

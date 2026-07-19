@@ -10,6 +10,7 @@ import {
   updateShareConfig,
 } from "../src/config.js";
 import { DEFAULT_TOOL_DISPLAY } from "../src/types.js";
+import { resolveLocale } from "../src/i18n/index.js";
 
 let tmpHome: string | null = null;
 
@@ -60,9 +61,11 @@ describe("loadConfig (~/.airgap/config.json)", () => {
     expect(cfg).toEqual({ share: { sessionListLimit: 10 } });
   });
 
-  it("读取支持的顶层 language，非法值静默忽略", async () => {
+  it("保留顶层 language 原值，让统一 locale 解析器处理回落", async () => {
     expect(await loadConfig(await homeWith('{"language":"zh-CN"}'))).toEqual({ language: "zh-CN" });
-    expect(await loadConfig(await homeWith('{"language":"fr"}'))).toEqual({});
+    const unsupported = await loadConfig(await homeWith('{"language":"fr"}'));
+    expect(unsupported).toEqual({ language: "fr" });
+    expect(resolveLocale({ config: unsupported.language, system: "zh-CN" })).toBe("en");
   });
 });
 

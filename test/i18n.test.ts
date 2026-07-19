@@ -39,5 +39,6 @@ describe("createI18n", () => {
     expect(en.keys()).toEqual(zh.keys());
     expect(en.t("share.turnCount", { count: 3 })).toBe("3 turns");
     expect(zh.t("share.turnCount", { count: 3 })).toBe("共 3 轮");
+    expect(en.t("share.turnCount", { count: 1 })).toBe("1 turn");
   });
 });

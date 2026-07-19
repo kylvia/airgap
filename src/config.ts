@@ -3,14 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import type { ToolDisplay } from "./types.js";
 import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "./types.js";
-import { isLocale, type Locale } from "./i18n/types.js";
 
 /**
  * ~/.airgap/config.json 的已知键。所有键可缺省，未知键忽略；
  * 文件缺失 / JSON 损坏 / 字段非法一律静默回退默认——配置永远不能让命令挂掉。
  */
 export interface AirgapConfig {
-  language?: Locale;
+  /** Raw preference; the centralized locale resolver owns normalization and fallback. */
+  language?: string;
   share?: {
     /** share 会话下拉最多列多少个（常用 10 / 20 / 50）；整数，clamp 到 [1, 200] */
     sessionListLimit?: number;
@@ -41,7 +41,7 @@ export async function loadConfig(home: string = os.homedir()): Promise<AirgapCon
     const cfg = asRecord(JSON.parse(raw));
     if (!cfg) return {};
     const out: AirgapConfig = {};
-    if (isLocale(cfg["language"])) out.language = cfg["language"];
+    if (typeof cfg["language"] === "string") out.language = cfg["language"];
     const share = asRecord(cfg["share"]);
     if (share) {
       const lim = clampLimit(share["sessionListLimit"]);

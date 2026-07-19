@@ -27,7 +27,7 @@ export function renderPage(
   const hiddenStatusKey = isMac ? "share.page.status.other" : "share.page.status.mac";
   const messages = Object.fromEntries(
     i18n.keys()
-      .filter((key) => (key.startsWith("share.page.") || key === "share.turnCount") && key !== hiddenStatusKey)
+      .filter((key) => (key.startsWith("share.page.") || key.startsWith("share.turnCount")) && key !== hiddenStatusKey)
       .map((key) => [key, i18n.t(key)]),
   );
   const chatCss = JSON.stringify(CHAT_CSS);
@@ -186,7 +186,8 @@ const DEFAULT = ${def};
 const LOCALE = ${JSON.stringify(locale)};
 const M = ${serializeForScript(messages)};
 function msg(key, params = {}) {
-  const template = M[key] || key;
+  const singularKey = params.count === 1 ? key + ".one" : "";
+  const template = M[singularKey] || M[key] || key;
   return template.replace(/\\{(\\w+)\\}/g, (match, name) => Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match);
 }
 const MARK_H = ${JSON.stringify(airgapMark(24))};   // 预览外壳 header/footer 的品牌 mark（与 renderHtml 一致）

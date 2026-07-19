@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { Command } from "commander";
+import { Command, Help } from "commander";
 import pc from "picocolors";
 import { discoverSessions } from "../discovery.js";
 import { pickSession } from "../session.js";
@@ -58,12 +58,13 @@ export async function runShare(opts: ShareOpts, i18n: I18n = createI18n("zh-CN")
 }
 
 export function registerShare(program: Command, i18n: I18n = createI18n("zh-CN")): void {
-  program
+  const command = program
     .command("share")
-    .description("Open a local web UI to pick turns, preview, and export/send (no cloud)")
-    .option("--session <prefix>", "preselect a session by id prefix")
-    .option("--port <n>", "preferred port (falls back to a free one if taken)")
-    .option("--no-open", "do not auto-open the browser (just print the URL)")
+    .description(i18n.t("share.command.description"))
+    .option("--session <prefix>", i18n.t("share.command.sessionOption"))
+    .option("--port <n>", i18n.t("share.command.portOption"))
+    .option("--no-open", i18n.t("share.command.noOpenOption"))
+    .helpOption("-h, --help", i18n.t("share.command.helpOption"))
     .action(async (opts: ShareOpts) => {
       try {
         await runShare(opts, i18n);
@@ -72,4 +73,14 @@ export function registerShare(program: Command, i18n: I18n = createI18n("zh-CN")
         process.exitCode = 1;
       }
     });
+  if (i18n.locale === "zh-CN") {
+    command.configureHelp({
+      formatHelp(cmd, helper): string {
+        return Help.prototype.formatHelp
+          .call(helper, cmd, helper)
+          .replace(/^Usage:/m, "用法：")
+          .replace(/^Options:/m, "选项：");
+      },
+    });
+  }
 }
