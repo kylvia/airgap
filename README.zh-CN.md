@@ -160,6 +160,31 @@ npx airgap doctor
 
 打印本机 `claude` / `codex` 版本，以及各格式的支持矩阵（scan/pack/open/show 各方言支持到什么程度）。
 
+## 版本更新提示
+
+在交互式终端中，airgap 每 24 小时最多向 npm 官方 Registry（`registry.npmjs.org`）检查一次新版本。请求只包含常规 HTTPS 元数据和当前 airgap 版本；不会读取或发送会话内容、项目名、文件路径或配置值。检查失败会静默跳过，airgap 也绝不会自动安装更新。
+
+发现新版本后，由用户明确执行升级：
+
+```sh
+npm install -g airgap@latest # 全局安装
+npx airgap@latest            # npx 使用方式
+```
+
+可在当前 shell 或 shell 配置中关闭检查：
+
+```sh
+export AIRGAP_NO_UPDATE_CHECK=1
+```
+
+也可以在 `~/.airgap/config.json` 顶层持久化关闭：
+
+```json
+{
+  "updateCheck": false
+}
+```
+
 ## 它是怎么工作的
 
 - **本地 JSONL，只读。** 会话是按行分隔的 JSON，claude 在 `~/.claude/projects/<munged-cwd>/<sid>.jsonl`（外加 `subagents/`、`tool-results/` sidecar），codex 在 `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`。airgap 只读它们；`~/.codex` 从不写入，`~/.claude` 也只有 open 安装新文件时才写，且绝不覆盖已存在文件。

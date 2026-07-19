@@ -160,6 +160,31 @@ npx airgap doctor
 
 Prints the local `claude` / `codex` versions and the per-format support matrix (which of scan/pack/open/show each dialect supports).
 
+## Update notices
+
+In an interactive terminal, airgap checks the official npm registry at `registry.npmjs.org` for a newer release at most once every 24 hours. The request sends normal HTTPS metadata and the running airgap version; it never reads or sends session contents, project names, filesystem paths, or configuration values. A failed check is silent, and airgap never installs an update automatically.
+
+When a newer release exists, upgrade explicitly:
+
+```sh
+npm install -g airgap@latest # global install
+npx airgap@latest            # npx usage
+```
+
+Disable checks for one shell or permanently in your shell profile:
+
+```sh
+export AIRGAP_NO_UPDATE_CHECK=1
+```
+
+Alternatively, set a top-level preference in `~/.airgap/config.json`:
+
+```json
+{
+  "updateCheck": false
+}
+```
+
 ## How it works
 
 - **Local JSONL, read-only.** Sessions live as newline-delimited JSON under `~/.claude/projects/<munged-cwd>/<sid>.jsonl` (plus `subagents/` and `tool-results/` sidecars) and `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. `airgap` reads them; it never writes into `~/.codex`, and into `~/.claude` only when `open` installs a new file (never overwriting an existing one).
