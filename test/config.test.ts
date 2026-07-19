@@ -68,6 +68,18 @@ describe("loadConfig (~/.airgap/config.json)", () => {
     expect(unsupported).toEqual({ language: "fr" });
     expect(resolveLocale({ config: unsupported.language, system: "zh-CN" })).toBe("en");
   });
+
+  it("只接受布尔型顶层 updateCheck 配置", async () => {
+    const home = await homeWith('{"updateCheck":false}');
+    expect(await loadConfig(home)).toEqual({ updateCheck: false });
+
+    const file = path.join(home, ".airgap", "config.json");
+    await writeFile(file, '{"updateCheck":true}', "utf8");
+    expect(await loadConfig(home)).toEqual({ updateCheck: true });
+
+    await writeFile(file, '{"updateCheck":"false"}', "utf8");
+    expect(await loadConfig(home)).toEqual({});
+  });
 });
 
 describe("updateShareConfig (share UI 设置面板的持久化)", () => {

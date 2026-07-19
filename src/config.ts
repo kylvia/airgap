@@ -11,6 +11,8 @@ import { LANGUAGE_PREFERENCES, type LanguagePreference } from "./i18n/index.js";
  * 文件缺失 / JSON 损坏 / 字段非法一律静默回退默认——配置永远不能让命令挂掉。
  */
 export interface AirgapConfig {
+  /** Whether interactive CLI launches may check npm for a newer Airgap release. */
+  updateCheck?: boolean;
   /** Raw preference; the centralized locale resolver owns normalization and fallback. */
   language?: string;
   share?: {
@@ -43,6 +45,7 @@ export async function loadConfig(home: string = os.homedir()): Promise<AirgapCon
     const cfg = asRecord(JSON.parse(raw));
     if (!cfg) return {};
     const out: AirgapConfig = {};
+    if (typeof cfg["updateCheck"] === "boolean") out.updateCheck = cfg["updateCheck"];
     if (typeof cfg["language"] === "string") out.language = cfg["language"];
     const share = asRecord(cfg["share"]);
     if (share) {
