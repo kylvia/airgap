@@ -1,6 +1,6 @@
 {
   "name": "airgap",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Scan, redact, and carry your local AI coding sessions. No cloud, no accounts.",
   "keywords": [
     "claude-code",
