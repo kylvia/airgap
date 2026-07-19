@@ -6,7 +6,7 @@ import { registerOpen } from "./commands/open.js";
 import { registerShow } from "./commands/show.js";
 import { registerShare } from "./commands/share.js";
 import { registerDoctor } from "./commands/doctor.js";
-import { extractLangArg } from "./cli.js";
+import { extractLangArg, registerUpdateCheckHook } from "./cli.js";
 import { loadConfig } from "./config.js";
 import { createI18n } from "./i18n/index.js";
 import { resolveLanguage } from "./i18n/system.js";
@@ -36,6 +36,13 @@ async function main(): Promise<void> {
   registerShow(program);
   registerShare(program, i18n, language);
   registerDoctor(program, language, i18n);
+
+  registerUpdateCheckHook(program, {
+    currentVersion: pkg.version,
+    i18n,
+    config,
+    argv: process.argv.slice(2),
+  });
 
   await program.parseAsync(process.argv);
 }
