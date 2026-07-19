@@ -7,6 +7,7 @@ import {
   loadConfig,
   sessionListLimit,
   shareToolDisplay,
+  updateConfig,
   updateShareConfig,
 } from "../src/config.js";
 import { DEFAULT_TOOL_DISPLAY } from "../src/types.js";
@@ -109,6 +110,38 @@ describe("updateShareConfig (share UI 设置面板的持久化)", () => {
     const cfg = await loadConfig(home);
     expect(sessionListLimit(cfg)).toBe(50);
     expect(shareToolDisplay(cfg)).toBe("full");
+  });
+});
+
+describe("updateConfig (语言与 Share 设置的原子持久化)", () => {
+  it("写入显式语言并在 auto 时只删除 language", async () => {
+    const home = await homeWith('{"future":{"keep":true},"share":{"toolDisplay":"full"}}');
+    expect(await updateConfig({ language: "zh-CN" }, home)).toMatchObject({ language: "zh-CN" });
+    expect(await loadConfig(home)).toEqual({ language: "zh-CN", share: { toolDisplay: "full" } });
+
+    await updateConfig({ language: "auto" }, home);
+    const raw = JSON.parse(
+      await readFile(path.join(home, ".airgap", "config.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(raw).toEqual({ future: { keep: true }, share: { toolDisplay: "full" } });
+  });
+
+  it("一次写入语言、列表条数和工具展示级别", async () => {
+    const home = await homeWith(null);
+    await expect(
+      updateConfig({ language: "en", sessionListLimit: 50, toolDisplay: "none" }, home),
+    ).resolves.toEqual({ language: "en", sessionListLimit: 50, toolDisplay: "none" });
+    await expect(loadConfig(home)).resolves.toEqual({
+      language: "en",
+      share: { sessionListLimit: 50, toolDisplay: "none" },
+    });
+  });
+
+  it("拒绝非法语言和损坏配置且不覆盖原文件", async () => {
+    const home = await homeWith("{ broken");
+    await expect(updateConfig({ language: "fr" as never }, home)).rejects.toThrow(/language/);
+    await expect(updateConfig({ language: "en" }, home)).rejects.toThrow(/无法解析/);
+    await expect(readFile(path.join(home, ".airgap", "config.json"), "utf8")).resolves.toBe("{ broken");
   });
 });
 

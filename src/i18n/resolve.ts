@@ -1,4 +1,4 @@
-import type { Locale } from "./types.js";
+import type { LanguagePreference, Locale } from "./types.js";
 
 export interface LocaleInputs {
   cli?: string;
@@ -11,6 +11,12 @@ export interface LocaleSelection {
   locale: Locale;
   source: string;
   detectedLocale?: string;
+}
+
+const EXPLICIT_LOCALE_SOURCES = new Set(["--lang", "AIRGAP_LANG", "config.language"]);
+
+export function languagePreferenceFromSelection(selection: LocaleSelection): LanguagePreference {
+  return EXPLICIT_LOCALE_SOURCES.has(selection.source) ? selection.locale : "auto";
 }
 
 export function normalizeLocale(value?: string): Locale | undefined {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createI18n,
+  languagePreferenceFromSelection,
   normalizeLocale,
   resolveLocale,
   resolveLocaleSelection,
@@ -70,6 +71,28 @@ describe("resolveLocaleSelection", () => {
       locale: "en",
       source: "English fallback",
     });
+  });
+});
+
+describe("languagePreferenceFromSelection", () => {
+  it("maps automatic sources to auto and explicit sources to the resolved locale", () => {
+    expect(
+      languagePreferenceFromSelection({
+        locale: "zh-CN",
+        source: "macOS AppleLanguages",
+        detectedLocale: "zh-Hans-CN",
+      }),
+    ).toBe("auto");
+    expect(
+      languagePreferenceFromSelection({ locale: "en", source: "--lang", detectedLocale: "en" }),
+    ).toBe("en");
+    expect(
+      languagePreferenceFromSelection({
+        locale: "zh-CN",
+        source: "config.language",
+        detectedLocale: "zh-CN",
+      }),
+    ).toBe("zh-CN");
   });
 });
 

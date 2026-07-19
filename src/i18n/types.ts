@@ -1,6 +1,9 @@
 export const SUPPORTED_LOCALES = ["en", "zh-CN"] as const;
 
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
+export type LanguagePreference = "auto" | Locale;
+
+export const LANGUAGE_PREFERENCES = ["auto", ...SUPPORTED_LOCALES] as const;
 
 export type MessageParams = Record<string, string | number>;
 

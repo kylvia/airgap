@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { ToolDisplay } from "./types.js";
 import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "./types.js";
+import { LANGUAGE_PREFERENCES, type LanguagePreference } from "./i18n/index.js";
 
 /**
  * ~/.airgap/config.json 的已知键。所有键可缺省，未知键忽略；
@@ -71,17 +72,33 @@ export interface ShareConfigPatch {
   toolDisplay?: ToolDisplay;
 }
 
+export interface ConfigPatch extends ShareConfigPatch {
+  language?: LanguagePreference;
+}
+
+export interface ConfigUpdateResult {
+  language: LanguagePreference;
+  sessionListLimit: number;
+  toolDisplay: ToolDisplay;
+}
+
 /**
  * 读-改-写 share.* 配置（share UI 的设置面板走这里持久化）：
  * 只动 patch 里给出的键，文件里的其他键（含未知键）原样保留；目录不存在则创建。
  * 文件存在但解析不了时**拒绝覆盖**（宁可保存失败，不销毁用户手写的配置）。
  * 返回写入后的最终 share 生效值。
  */
-export async function updateShareConfig(
-  patch: ShareConfigPatch,
+export async function updateConfig(
+  patch: ConfigPatch,
   home: string = os.homedir(),
-): Promise<{ sessionListLimit: number; toolDisplay: ToolDisplay }> {
+): Promise<ConfigUpdateResult> {
   const out: ShareConfigPatch = {};
+  if (
+    patch.language !== undefined &&
+    !(LANGUAGE_PREFERENCES as readonly string[]).includes(patch.language)
+  ) {
+    throw new Error(`language 只接受 ${LANGUAGE_PREFERENCES.join(" | ")}，收到：${String(patch.language)}`);
+  }
   if (patch.sessionListLimit !== undefined) {
     const clamped = clampLimit(patch.sessionListLimit);
     if (clamped === undefined) throw new Error(`sessionListLimit 需要整数，收到：${String(patch.sessionListLimit)}`);
@@ -104,15 +121,33 @@ export async function updateShareConfig(
       throw new Error("~/.airgap/config.json 已存在但无法解析；为避免覆盖你的内容未保存，请手动修复后重试");
     }
   }
-  const share = { ...(asRecord(raw["share"]) ?? {}), ...out };
-  raw["share"] = share;
+  if (patch.language === "auto") delete raw["language"];
+  else if (patch.language !== undefined) raw["language"] = patch.language;
+
+  if (out.sessionListLimit !== undefined || out.toolDisplay !== undefined) {
+    raw["share"] = { ...(asRecord(raw["share"]) ?? {}), ...out };
+  }
   await mkdir(dir, { recursive: true });
   await writeFile(file, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+  const share = asRecord(raw["share"]) ?? {};
   const merged: AirgapConfig = {
     share: {
       sessionListLimit: clampLimit(share["sessionListLimit"]),
       toolDisplay: asToolDisplay(share["toolDisplay"]),
     },
   };
-  return { sessionListLimit: sessionListLimit(merged), toolDisplay: shareToolDisplay(merged) };
+  const language = raw["language"] === "en" || raw["language"] === "zh-CN" ? raw["language"] : "auto";
+  return {
+    language,
+    sessionListLimit: sessionListLimit(merged),
+    toolDisplay: shareToolDisplay(merged),
+  };
+}
+
+export async function updateShareConfig(
+  patch: ShareConfigPatch,
+  home: string = os.homedir(),
+): Promise<{ sessionListLimit: number; toolDisplay: ToolDisplay }> {
+  const saved = await updateConfig(patch, home);
+  return { sessionListLimit: saved.sessionListLimit, toolDisplay: saved.toolDisplay };
 }
