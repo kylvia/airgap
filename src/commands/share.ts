@@ -4,6 +4,7 @@ import pc from "picocolors";
 import { discoverSessions } from "../discovery.js";
 import { pickSession } from "../session.js";
 import { startShareServer } from "../server/share-server.js";
+import { createI18n, type I18n } from "../i18n/index.js";
 
 interface ShareOpts {
   session?: string;
@@ -24,11 +25,19 @@ export function openBrowser(url: string): void {
   }
 }
 
-export async function runShare(opts: ShareOpts): Promise<void> {
+export function shareStartupLines(i18n: I18n, isMac: boolean, url: string): string[] {
+  return [
+    i18n.t("share.cli.started", { url }),
+    i18n.t("share.cli.browser"),
+    i18n.t(isMac ? "share.cli.flow.mac" : "share.cli.flow.other"),
+  ];
+}
+
+export async function runShare(opts: ShareOpts, i18n: I18n = createI18n("zh-CN")): Promise<void> {
   // 默认会话：--session 前缀 > cwd 对应 > 全局最近
   const sessions = await discoverSessions({});
   if (sessions.length === 0) {
-    console.error(pc.red("没发现任何本地会话（~/.claude 或 ~/.codex）。"));
+    console.error(pc.red(i18n.t("share.cli.noSessions")));
     process.exitCode = 1;
     return;
   }
@@ -38,17 +47,17 @@ export async function runShare(opts: ShareOpts): Promise<void> {
   const server = await startShareServer({
     port: port && Number.isInteger(port) ? port : undefined,
     defaultSession: def?.id,
+    locale: i18n.locale,
   });
 
-  console.log(`${pc.green("✔")} airgap share 已启动：${pc.bold(server.url)}`);
-  console.log(pc.dim("  浏览器会自动打开；没弹出就手动点上面的地址。"));
-  const exportTip = process.platform === "darwin" ? "复制长图/存桌面" : "下载 PNG/存桌面";
-  console.log(pc.dim(`  勾选轮次 → 右侧预览 → ${exportTip}；用完点页面「完成关闭」，或 10 分钟空闲自动退出。`));
+  const [started, ...guidance] = shareStartupLines(i18n, process.platform === "darwin", server.url);
+  console.log(`${pc.green("✔")} ${started}`);
+  for (const line of guidance) console.log(pc.dim(line));
 
   if (opts.open !== false) openBrowser(server.url);
 }
 
-export function registerShare(program: Command): void {
+export function registerShare(program: Command, i18n: I18n = createI18n("zh-CN")): void {
   program
     .command("share")
     .description("Open a local web UI to pick turns, preview, and export/send (no cloud)")
@@ -57,7 +66,7 @@ export function registerShare(program: Command): void {
     .option("--no-open", "do not auto-open the browser (just print the URL)")
     .action(async (opts: ShareOpts) => {
       try {
-        await runShare(opts);
+        await runShare(opts, i18n);
       } catch (err) {
         console.error(pc.red(err instanceof Error ? err.message : String(err)));
         process.exitCode = 1;

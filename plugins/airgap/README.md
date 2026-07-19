@@ -18,7 +18,7 @@ This makes the checkout's `airgap` executable available to both assistant integr
 - Codex: `$airgap-share`
 - Terminal: `airgap share`
 
-All three start the same picker, bound only to the loopback interface. Use **完成关闭** on the page when finished; ten minutes of inactivity also stops the process. The picker runs only when invoked: airgap itself does not stay resident.
+All three start the same picker, bound only to the loopback interface. Use the page's close button (**Done** / **完成关闭**) when finished; ten minutes of inactivity also stops the process. The picker runs only when invoked: airgap itself does not stay resident.
 
 For a shorter terminal entry, add your own alias:
 

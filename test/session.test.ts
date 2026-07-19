@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RuleMatch, SessionInfo, Turn } from "../src/types.js";
-import { peekTitle, pickSession, redactTurns, scanOneTurn, scanTurns, turnTag } from "../src/session.js";
+import { peekTitle, pickSession, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../src/session.js";
 
 describe("turnTag", () => {
   it("flags non-question user turns", () => {
@@ -17,6 +17,21 @@ describe("turnTag", () => {
   it("returns empty for a normal user question", () => {
     expect(turnTag("怎么导出某几轮？")).toBe("");
     expect(turnTag("  hello  ")).toBe("");
+  });
+
+  it("returns English system tags when requested", () => {
+    expect(turnTag("<task-notification>\n...", "en")).toBe("Task notification");
+    expect(turnTag("/model claude", "en")).toBe("Command");
+    expect(turnTag("[图片]", "en")).toBe("Image");
+    expect(turnTag("<ide_selection>...", "en")).toBe("System");
+  });
+});
+
+describe("sessionTitle", () => {
+  it("localizes only the generated fallback title", () => {
+    const info = sess("abc", "/work/demo", 1);
+    expect(sessionTitle([], info, "en")).toBe("demo · session turns");
+    expect(sessionTitle([], info, "zh-CN")).toBe("demo · 会话片段");
   });
 });
 

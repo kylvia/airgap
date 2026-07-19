@@ -3,10 +3,13 @@ import { DEFAULT_TOOL_DISPLAY } from "../types.js";
 import MarkdownIt from "markdown-it";
 import { tasklist } from "@mdit/plugin-tasklist";
 import { THEME_CSS } from "./theme.js";
+import { createI18n, type I18n, type Locale } from "../i18n/index.js";
 
 export interface RenderOptions {
   /** how tool calls appear; defaults to DEFAULT_TOOL_DISPLAY ("summary") */
   tools?: ToolDisplay;
+  /** language for renderer-owned labels; transcript content is never translated */
+  locale?: Locale;
 }
 
 export function escapeHtml(s: string): string {
@@ -249,18 +252,20 @@ function toolBrief(block: TurnBlock): string {
   return block.text.startsWith(prefix) ? block.text.slice(prefix.length) : block.text;
 }
 
-function toolStatus(block: TurnBlock, withLabel: boolean): string {
+function toolStatus(block: TurnBlock, withLabel: boolean, i18n: I18n): string {
   const isError = block.toolError === true;
   if (!block.toolResult && !isError) return "";
-  const mark = isError ? (withLabel ? "✗ 失败" : "✗") : withLabel ? "✓ 完成" : "✓";
+  const mark = isError
+    ? withLabel ? `✗ ${i18n.t("render.tool.failed")}` : "✗"
+    : withLabel ? `✓ ${i18n.t("render.tool.completed")}` : "✓";
   return `<span class="tool-status ${isError ? "err" : "ok"}">${mark}</span>`;
 }
 
 /** summary 一行：工具名 + 主参数摘要 + 状态。检索类在 full 级别也走这条。 */
-function renderToolLine(block: TurnBlock): string {
+function renderToolLine(block: TurnBlock, i18n: I18n): string {
   const name = escapeHtml(block.toolName ?? "tool");
   const brief = escapeHtml(toolBrief(block));
-  return `<div class="toolline"><span class="tool-name">${name}</span><span class="tool-brief">${brief}</span>${toolStatus(block, false)}</div>`;
+  return `<div class="toolline"><span class="tool-name">${name}</span><span class="tool-brief">${brief}</span>${toolStatus(block, false, i18n)}</div>`;
 }
 
 /** 文件路径 → basename（兼容 / 与 \），供写改类头部突出文件名。 */
@@ -270,7 +275,7 @@ function fileBasename(p: string | undefined): string | null {
 }
 
 /** 单张工具卡：头部（工具名 + 写改类的文件名 + 完成/报错状态）+ 输入 + 结果摘要。 */
-function renderToolCard(block: TurnBlock, kind: ToolKind): string {
+function renderToolCard(block: TurnBlock, kind: ToolKind, i18n: I18n): string {
   const name = escapeHtml(block.toolName ?? "tool");
   const isError = block.toolError === true;
   const result = block.toolResult ?? "";
@@ -287,7 +292,7 @@ function renderToolCard(block: TurnBlock, kind: ToolKind): string {
         : "";
 
   const out: string[] = [`<div class="toolcard${isError ? " toolcard-err" : ""}">`];
-  out.push(`<div class="toolcard-head"><span class="tool-name">${name}</span>${fileTag}${toolStatus(block, true)}</div>`);
+  out.push(`<div class="toolcard-head"><span class="tool-name">${name}</span>${fileTag}${toolStatus(block, true, i18n)}</div>`);
   if (input) out.push(`<div class="toolcard-in">${input}</div>`);
   if (result) out.push(`<div class="toolcard-out">${escapeHtml(result).replace(/\n/g, "<br>")}</div>`);
   out.push("</div>");
@@ -295,18 +300,19 @@ function renderToolCard(block: TurnBlock, kind: ToolKind): string {
 }
 
 /** 按展示级别分发：none 完全不渲染（导出物里物理不存在，不是 CSS 藏起来）。 */
-function renderToolBlock(block: TurnBlock, tools: ToolDisplay): string {
+function renderToolBlock(block: TurnBlock, tools: ToolDisplay, i18n: I18n): string {
   if (tools === "none") return "";
   const kind = toolKind(block.toolName);
-  if (tools === "summary" || kind === "search") return renderToolLine(block);
-  return renderToolCard(block, kind);
+  if (tools === "summary" || kind === "search") return renderToolLine(block, i18n);
+  return renderToolCard(block, kind, i18n);
 }
 
 /** 单轮聊天片段：轮次标记 + 用户纸条 + AI 纸面卡片。工具块按 opts.tools 级别渲染。供预览面板逐轮拼装复用。 */
 export function renderTurnBlock(turn: Turn, opts?: RenderOptions): string {
   const tools = opts?.tools ?? DEFAULT_TOOL_DISPLAY;
+  const i18n = createI18n(opts?.locale ?? "zh-CN");
   const out: string[] = [];
-  out.push(`  <div class="turn-label">—— 第 ${turn.index} 轮 ——</div>`);
+  out.push(`  <div class="turn-label">—— ${i18n.t("render.turn", { index: turn.index })} ——</div>`);
   out.push(
     `  <div class="msg-user"><div class="bubble">${escapeHtml(turn.userText).replace(/\n/g, "<br>")}</div></div>`,
   );
@@ -316,10 +322,10 @@ export function renderTurnBlock(turn: Turn, opts?: RenderOptions): string {
       inner.push(markdownToHtml(block.text));
     } else if (block.kind === "thinking") {
       inner.push(
-        `<details class="thinking"><summary>${thinkingMark()}<span>思考过程</span></summary><div class="thinking-body">${escapeHtml(block.text)}</div></details>`,
+        `<details class="thinking"><summary>${thinkingMark()}<span>${i18n.t("render.thinking")}</span></summary><div class="thinking-body">${escapeHtml(block.text)}</div></details>`,
       );
     } else {
-      const rendered = renderToolBlock(block, tools);
+      const rendered = renderToolBlock(block, tools, i18n);
       if (rendered) inner.push(rendered);
     }
   }
@@ -331,18 +337,20 @@ export function renderTurnBlock(turn: Turn, opts?: RenderOptions): string {
 
 /** 单文件 Dossier 风聊天 HTML：warm bone 纸面 + paper 卡片 + off-black/pastel 点缀，深色跟随系统（PNG 截图恒为浅色）。 */
 export function renderHtml(turns: Turn[], meta: { title: string; date: string }, opts?: RenderOptions): string {
+  const locale = opts?.locale ?? "zh-CN";
+  const i18n = createI18n(locale);
   const body: string[] = [];
   body.push('  <div class="header">');
   body.push(`    <div class="title">${airgapMark(24)}<span>${escapeHtml(meta.title)}</span></div>`);
-  body.push(`    <div>${escapeHtml(meta.date)} · 共 ${turns.length} 轮</div>`);
+  body.push(`    <div>${escapeHtml(meta.date)} · ${i18n.t("share.turnCount", { count: turns.length })}</div>`);
   body.push("  </div>");
   for (const turn of turns) {
     body.push(renderTurnBlock(turn, opts));
   }
-  body.push(`  <div class="footer">${airgapMark(13)}<span>导出自本地会话 · Generated by airgap</span></div>`);
+  body.push(`  <div class="footer">${airgapMark(13)}<span>${i18n.t("render.footer")}</span></div>`);
 
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${locale}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RuleMatch, Turn } from "../src/types.js";
 import { exportBlockReason } from "../src/server/share-server.js";
-import { renderPage } from "../src/server/page.js";
+import { renderPage, serializeForScript } from "../src/server/page.js";
 
 const scan = (s: string): RuleMatch[] =>
   s.includes("sk-ant-LEAK")
@@ -42,6 +42,10 @@ describe("exportBlockReason (share server-side export gate)", () => {
   it("allows clean content through", () => {
     expect(exportBlockReason([toolTurn("none")], false, scan)).toBeNull();
   });
+
+  it("localizes the server-side risk response", () => {
+    expect(exportBlockReason([toolTurn("result")], false, scan, "en")).toMatch(/possible secrets/i);
+  });
 });
 
 describe("renderPage (share picker shell)", () => {
@@ -68,6 +72,23 @@ describe("renderPage (share picker shell)", () => {
     expect(page).not.toContain("backdrop-filter");
     expect(page).toContain("var(--bg-subtle)");
     expect(page).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+  });
+});
+
+describe("renderPage internationalization", () => {
+  it("renders an English picker with matching document and browser locale", () => {
+    const page = renderPage(undefined, "summary", true, "en");
+    expect(page).toContain('<html lang="en">');
+    expect(page).toContain("Share session turns");
+    expect(page).toContain('title="Refresh session data"');
+    expect(page).toContain(">Copy image</button>");
+    expect(page).toContain('const LOCALE = "en";');
+    expect(page).not.toContain("分享会话片段");
+  });
+
+  it("escapes strings before embedding them in an inline script", () => {
+    expect(serializeForScript({ value: "</script><script>alert(1)</script>" })).not.toContain("</script>");
+    expect(serializeForScript({ value: "</script>" })).toContain("\\u003c/script>");
   });
 });
 

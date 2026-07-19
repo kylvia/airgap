@@ -1,5 +1,13 @@
-import { CHAT_CSS, airgapMark } from "../render/html.js";
+import { CHAT_CSS, airgapMark, escapeHtml } from "../render/html.js";
 import { THEME_CSS } from "../render/theme.js";
+import { createI18n, type Locale } from "../i18n/index.js";
+
+export function serializeForScript(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
 
 /**
  * 交互页：左勾选、右实时预览（隔离在 iframe 里，聊天 CSS 不污染 app 外壳）、
@@ -8,27 +16,38 @@ import { THEME_CSS } from "../render/theme.js";
  * isMac：复制到剪贴板走 osascript/pbcopy，只有 macOS 支持——非 mac 时把跨平台的「下载 PNG」
  * 设为主按钮，剪贴板按钮降级为次要并加提示，避免非 mac 用户点最显眼的按钮先撞一次失败。
  */
-export function renderPage(defaultSession?: string, toolDisplay = "summary", isMac = true): string {
+export function renderPage(
+  defaultSession?: string,
+  toolDisplay = "summary",
+  isMac = true,
+  locale: Locale = "zh-CN",
+): string {
+  const i18n = createI18n(locale);
+  const t = (key: string, params?: Record<string, string | number>): string => i18n.t(key, params);
+  const hiddenStatusKey = isMac ? "share.page.status.other" : "share.page.status.mac";
+  const messages = Object.fromEntries(
+    i18n.keys()
+      .filter((key) => (key.startsWith("share.page.") || key === "share.turnCount") && key !== hiddenStatusKey)
+      .map((key) => [key, i18n.t(key)]),
+  );
   const chatCss = JSON.stringify(CHAT_CSS);
   const def = JSON.stringify(defaultSession ?? "");
   const primaryCls = (on: boolean): string => (on ? ' class="primary"' : "");
-  const clipboardHint = isMac ? "" : ' title="复制到剪贴板目前仅 macOS 支持，请用「下载 PNG」"';
-  const statusHint = isMac
-    ? "默认「脱敏后导出」。勾选轮次 → 右侧预览 → 点「复制长图」→ Cmd-V 粘贴。"
-    : "默认「脱敏后导出」。勾选轮次 → 右侧预览 → 点「下载 PNG」保存图片。";
+  const clipboardHint = isMac ? "" : ` title="${escapeHtml(t("share.page.clipboardHint"))}"`;
+  const statusHint = t(isMac ? "share.page.status.mac" : "share.page.status.other");
   const warnMark = '<svg class="wicon" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2 15 14.2H1z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.6v3.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="8" cy="11.7" r="0.55" fill="currentColor"/></svg>';
   const refreshMark = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13.2 7.2A5.4 5.4 0 1 0 13 9.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M13.2 3.8v3.5H9.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   // 设置入口的滑杆图标（inline SVG，零 emoji）
   const prefsMark = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="10.5" cy="4.5" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/><circle cx="5.5" cy="8" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="11.5" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/></svg>';
   const toolsOptions = (["none", "summary", "full"] as const)
-    .map((v) => `<option value="${v}"${v === toolDisplay ? " selected" : ""}>${{ none: "隐藏", summary: "摘要", full: "完整" }[v]}</option>`)
+    .map((v) => `<option value="${v}"${v === toolDisplay ? " selected" : ""}>${escapeHtml(t(`share.page.tool.${v}`))}</option>`)
     .join("");
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${locale}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>airgap · 分享会话片段</title>
+<title>${escapeHtml(t("share.page.title"))}</title>
 <style>
 ${THEME_CSS}
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -91,7 +110,7 @@ ${THEME_CSS}
   .left .bar a:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .list { flex: 1; overflow-y: auto; padding: 6px 0; }
   .list:empty::after {
-    content: "从上方选择会话，勾选要分享的轮次开始";
+    content: ${JSON.stringify(t("share.page.empty"))};
     display: block; padding: 48px 28px; text-align: center; color: var(--fg-subtle);
     font-size: 13px; line-height: 1.7;
   }
@@ -126,26 +145,26 @@ ${THEME_CSS}
 <body>
   <header>
     <span class="logo">${airgapMark(20)}<span>airgap</span></span>
-    <span style="font-size:13px;color:var(--fg-muted)">分享会话片段</span>
+    <span style="font-size:13px;color:var(--fg-muted)">${escapeHtml(t("share.page.subtitle"))}</span>
     <select id="sess"></select>
-    <button id="refresh" title="刷新会话数据" aria-label="刷新会话数据">${refreshMark}</button>
-    <span id="sid" style="display:none" title="点击复制 resume 命令（含完整会话 id）"></span>
-    <button id="prefs" title="设置（写入 ~/.airgap/config.json）" aria-label="设置">${prefsMark}</button>
+    <button id="refresh" title="${escapeHtml(t("share.page.refresh"))}" aria-label="${escapeHtml(t("share.page.refresh"))}">${refreshMark}</button>
+    <span id="sid" style="display:none" title="${escapeHtml(t("share.page.copyResume"))}"></span>
+    <button id="prefs" title="${escapeHtml(t("share.page.settings"))}" aria-label="${escapeHtml(t("share.page.settingsAria"))}">${prefsMark}</button>
     <div id="prefpanel" hidden>
-      <div class="prow"><span>会话列表</span><select id="limit">
-        <option value="10">近 10 条</option>
-        <option value="20">近 20 条</option>
-        <option value="50">近 50 条</option>
+      <div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit">
+        <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
+        <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
+        <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
       </select></div>
-      <div class="prow"><span>工具展示</span><select id="tools">${toolsOptions}</select></div>
+      <div class="prow"><span>${escapeHtml(t("share.page.toolDisplay"))}</span><select id="tools">${toolsOptions}</select></div>
     </div>
   </header>
   <div class="sbanner" id="sbanner"></div>
   <main>
-    <div class="loading" id="loading">${airgapMark(26)}<span>加载会话内容…</span></div>
+    <div class="loading" id="loading">${airgapMark(26)}<span>${escapeHtml(t("share.page.loadingContent"))}</span></div>
     <div class="left">
       <div class="bar">
-        <a id="all">全选</a><a id="none">清空</a>
+        <a id="all">${escapeHtml(t("share.page.selectAll"))}</a><a id="none">${escapeHtml(t("share.page.clear"))}</a>
         <span id="count" style="margin-left:auto"></span>
       </div>
       <div class="list" id="list"></div>
@@ -153,17 +172,23 @@ ${THEME_CSS}
     <div class="right"><iframe id="preview"></iframe></div>
   </main>
   <footer>
-    <label class="rdct" title="导出前把检测到的密钥替换成占位符（推荐默认开）"><input type="checkbox" id="redact" checked>脱敏后导出</label>
-    <button${primaryCls(isMac)} data-a="clipboard" data-f="png"${clipboardHint}>复制长图</button>
-    <button${primaryCls(!isMac)} data-a="download" data-f="png">下载 PNG</button>
-    <button data-a="clipboard" data-f="md"${clipboardHint}>复制 Markdown</button>
-    <button data-a="save" data-f="png">存桌面</button>
-    <span class="status" id="status">${statusHint}</span>
-    <button id="done">完成关闭</button>
+    <label class="rdct" title="${escapeHtml(t("share.page.redactHint"))}"><input type="checkbox" id="redact" checked>${escapeHtml(t("share.page.redact"))}</label>
+    <button${primaryCls(isMac)} data-a="clipboard" data-f="png"${clipboardHint}>${escapeHtml(t("share.page.copyImage"))}</button>
+    <button${primaryCls(!isMac)} data-a="download" data-f="png">${escapeHtml(t("share.page.downloadPng"))}</button>
+    <button data-a="clipboard" data-f="md"${clipboardHint}>${escapeHtml(t("share.page.copyMarkdown"))}</button>
+    <button data-a="save" data-f="png">${escapeHtml(t("share.page.saveDesktop"))}</button>
+    <span class="status" id="status">${escapeHtml(statusHint)}</span>
+    <button id="done">${escapeHtml(t("share.page.done"))}</button>
   </footer>
 <script>
 const CHAT_CSS = ${chatCss};
 const DEFAULT = ${def};
+const LOCALE = ${JSON.stringify(locale)};
+const M = ${serializeForScript(messages)};
+function msg(key, params = {}) {
+  const template = M[key] || key;
+  return template.replace(/\\{(\\w+)\\}/g, (match, name) => Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : match);
+}
 const MARK_H = ${JSON.stringify(airgapMark(24))};   // 预览外壳 header/footer 的品牌 mark（与 renderHtml 一致）
 const MARK_F = ${JSON.stringify(airgapMark(13))};
 const WARN_MARK = ${JSON.stringify(warnMark)};
@@ -180,7 +205,7 @@ function fillOptions(sessions, keep) {
     const o = document.createElement("option");
     o.value = s.id;
     // 标题优先（区分度最高）；无标题（codex / 未生成）回退项目名。id 前缀对 UI 没有区分价值，不再展示。
-    o.textContent = (s.title || s.project + " · 会话片段") + " · " + s.source + " · " + rel(s.mtimeMs);
+    o.textContent = (s.title || s.project + " · " + msg("share.page.fallbackTitle")) + " · " + s.source + " · " + rel(s.mtimeMs);
     sel.appendChild(o);
   }
   if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
@@ -191,7 +216,7 @@ function syncLimitSelect(limit) {
   const sel = $("limit");
   if (![...sel.options].some((o) => Number(o.value) === limit)) {
     const o = document.createElement("option");
-    o.value = String(limit); o.textContent = "近 " + limit + " 条";
+    o.value = String(limit); o.textContent = msg("share.page.recent", { count: limit });
     sel.appendChild(o);
   }
   sel.value = String(limit);
@@ -228,16 +253,16 @@ async function refreshCurrentSession() {
   button.setAttribute("aria-busy", "true");
   try {
     if (!await refreshSessions()) {
-      setStatus("会话列表刷新失败，请稍后重试。", true);
+      setStatus(msg("share.page.refreshListFailed"), true);
       return;
     }
     if (!detail) {
-      setStatus("已刷新会话列表。");
+      setStatus(msg("share.page.listRefreshed"));
       return;
     }
-    await loadSession(detail.id, true, "已刷新会话列表和当前会话内容。");
+    await loadSession(detail.id, true, msg("share.page.sessionRefreshed"));
   } catch {
-    setStatus("会话数据刷新失败，请稍后重试。", true);
+    setStatus(msg("share.page.refreshFailed"), true);
   } finally {
     button.disabled = false;
     button.removeAttribute("aria-busy");
@@ -249,9 +274,9 @@ $("refresh").onclick = () => { refreshCurrentSession(); };
 $("limit").onchange = async () => {
   const n = Number($("limit").value);
   const r = await fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionListLimit: n }) });
-  const res = await r.json().catch(() => ({ ok: false, message: "保存失败" }));
-  if (!res.ok) { setStatus(res.message || "保存失败", true); return; }
-  setStatus("会话列表条数已设为 " + res.limit + "（已写入 ~/.airgap/config.json）。");
+  const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.saveFailed") }));
+  if (!res.ok) { setStatus(res.message || msg("share.page.saveFailed"), true); return; }
+  setStatus(msg("share.page.listSaved", { count: res.limit }));
   await refreshSessions();
 };
 window.addEventListener("focus", () => {
@@ -262,17 +287,20 @@ window.addEventListener("focus", () => {
 
 function rel(ms) {
   const d = (Date.now() - ms) / 1000;
-  if (d < 60) return "刚刚"; if (d < 3600) return Math.floor(d / 60) + "分钟前";
-  if (d < 86400) return Math.floor(d / 3600) + "小时前"; return Math.floor(d / 86400) + "天前";
+  const formatter = new Intl.RelativeTimeFormat(LOCALE, { numeric: "auto" });
+  if (d < 60) return formatter.format(0, "second");
+  if (d < 3600) return formatter.format(-Math.floor(d / 60), "minute");
+  if (d < 86400) return formatter.format(-Math.floor(d / 3600), "hour");
+  return formatter.format(-Math.floor(d / 86400), "day");
 }
 
 function setLoading(on) { $("loading").classList.toggle("on", !!on); }
 
 async function loadSession(id, keepSelection, refreshedStatus) {
-  setStatus("加载中…"); setLoading(true);
+  setStatus(msg("share.page.loading")); setLoading(true);
   try {
     const r = await fetch("/api/session/" + encodeURIComponent(id) + "?tools=" + encodeURIComponent($("tools").value));
-    if (!r.ok) { setStatus("加载失败", true); return false; }
+    if (!r.ok) { setStatus(msg("share.page.loadFailed"), true); return false; }
     detail = await r.json();
     if (!keepSelection) {
       selected.clear();
@@ -291,15 +319,15 @@ async function loadSession(id, keepSelection, refreshedStatus) {
     sid.onclick = async () => {
       const resume = (detail.source === "codex" ? "codex resume " : "claude --resume ") + detail.id;
       const cmd = detail.cwd ? 'cd "' + detail.cwd + '" && ' + resume : resume;
-      try { await navigator.clipboard.writeText(cmd); setStatus("已复制：" + cmd); }
+      try { await navigator.clipboard.writeText(cmd); setStatus(msg("share.page.copied", { command: cmd })); }
       catch { setStatus(cmd); } // 剪贴板不可用就把命令亮在状态栏，手动抄
     };
     setStatus(keepSelection
-      ? refreshedStatus || "已按新的工具展示级别刷新预览。"
-      : "共 " + detail.turns.length + " 轮，已默认勾选 " + selected.size + " 轮真实对话。");
+      ? refreshedStatus || msg("share.page.toolRefreshed")
+      : msg("share.page.loadedSummary", { turns: detail.turns.length, selected: selected.size }));
     return true;
   } catch {
-    setStatus("加载失败（分享服务可能已关闭）", true);
+    setStatus(msg("share.page.loadClosed"), true);
     return false;
   } finally {
     setLoading(false);
@@ -312,19 +340,19 @@ function renderList() {
     // div 而非 label：行正文点击=预览定位查看，勾选只属于 checkbox 本身——两个动作解绑。
     const row = document.createElement("div"); row.className = "row";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = selected.has(t.index);
-    cb.setAttribute("aria-label", "勾选第 " + t.index + " 轮");
+    cb.setAttribute("aria-label", msg("share.page.selectTurn", { index: t.index }));
     cb.onchange = () => { cb.checked ? selected.add(t.index) : selected.delete(t.index); syncPreview(cb.checked ? t.index : null); updateCount(); };
     // 行点击只对已勾选轮定位滚动；未勾选轮不在预览里（预览=导出），给一句状态提示防「点了没反应」。
     row.onclick = (e) => {
       if (e.target === cb) return;
       if (selected.has(t.index)) syncPreview(t.index);
-      else setStatus("第 " + t.index + " 轮未勾选，不在预览里。");
+      else setStatus(msg("share.page.unselectedTurn", { index: t.index }));
     };
     const body = document.createElement("div"); body.className = "body";
     const top = document.createElement("div"); top.className = "top";
-    top.innerHTML = '<span class="idx">第' + t.index + '轮</span><span class="prev"></span>'
+    top.innerHTML = '<span class="idx">' + msg("share.page.turnLabel", { index: t.index }) + '</span><span class="prev"></span>'
       + (t.tag ? '<span class="tag">' + t.tag + '</span>' : '')
-      + (t.findings > 0 ? '<span class="warn">' + WARN_MARK + '含' + t.findings + '处疑似密钥</span>' : '');
+      + (t.findings > 0 ? '<span class="warn">' + WARN_MARK + msg("share.page.findingCount", { count: t.findings }) + '</span>' : '');
     top.querySelector(".prev").textContent = t.preview;
     body.appendChild(top); row.appendChild(cb); row.appendChild(body); list.appendChild(row);
   }
@@ -332,10 +360,10 @@ function renderList() {
 }
 
 function updateCount() {
-  $("count").textContent = "已选 " + selected.size;
+  $("count").textContent = msg("share.page.selectedCount", { count: selected.size });
   const risky = detail.turns.filter((t) => selected.has(t.index) && t.findings > 0);
   const b = $("sbanner");
-  if (risky.length) { b.style.display = "flex"; b.innerHTML = WARN_MARK + "<span>选中的第 " + risky.map((t) => t.index).join("、") + " 轮含疑似密钥；默认「脱敏后导出」会替换成占位符，取消勾选则原样导出。</span>"; }
+  if (risky.length) { b.style.display = "flex"; b.innerHTML = WARN_MARK + "<span>" + msg("share.page.riskBanner", { turns: risky.map((t) => t.index).join(LOCALE === "zh-CN" ? "、" : ", ") }) + "</span>"; }
   else b.style.display = "none";
 }
 
@@ -347,9 +375,9 @@ function buildPreviewShell() {
     .join("\\n");
   // <base target="_blank">：会话内容里的链接在新标签打开，绝不让预览 iframe 本身被导航走
   // （否则点一下相对链接，iframe 就跳到 share server 的 404，预览直接报废）。
-  const doc = '<!DOCTYPE html><html><head><meta charset="UTF-8"><base target="_blank"><style>' + CHAT_CSS + '</style></head><body><div class="wrap">'
-    + '<div class="header"><div class="title">' + MARK_H + '<span>' + esc(detail.title) + '</span></div><div id="pv-sub">' + esc(detail.date) + ' · 共 0 轮</div></div>'
-    + blocks + '<div class="footer">' + MARK_F + '<span>导出自本地会话 · Generated by airgap</span></div></div></body></html>';
+  const doc = '<!DOCTYPE html><html lang="' + LOCALE + '"><head><meta charset="UTF-8"><base target="_blank"><style>' + CHAT_CSS + '</style></head><body><div class="wrap">'
+    + '<div class="header"><div class="title">' + MARK_H + '<span>' + esc(detail.title) + '</span></div><div id="pv-sub">' + esc(detail.date) + ' · ' + msg("share.turnCount", { count: 0 }) + '</div></div>'
+    + blocks + '<div class="footer">' + MARK_F + '<span>' + msg("share.page.previewFooter") + '</span></div></div></body></html>';
   const iframe = $("preview");
   pvReady = false;
   iframe.onload = () => { pvReady = true; syncPreview(null); };
@@ -370,7 +398,7 @@ function syncPreview(scrollTo) {
     if (on) n++;
   }
   const sub = doc.getElementById("pv-sub");
-  if (sub) sub.textContent = detail.date + " · 共 " + n + " 轮";
+  if (sub) sub.textContent = detail.date + " · " + msg("share.turnCount", { count: n });
   if (scrollTo != null) {
     const el = doc.getElementById("pv-turn-" + scrollTo);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -380,28 +408,28 @@ function syncPreview(scrollTo) {
 function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
 async function doExport(action, format, acceptRisk) {
-  if (!detail || selected.size === 0) { setStatus("先勾选至少一轮", true); return; }
+  if (!detail || selected.size === 0) { setStatus(msg("share.page.selectOne"), true); return; }
   const redact = $("redact").checked;
   const risky = detail.turns.filter((t) => selected.has(t.index) && t.findings > 0);
   // 脱敏后导出是安全的，无需确认；仅「原样导出且命中」时才二次确认。
-  if (!redact && risky.length && !acceptRisk && !confirm("选中的第 " + risky.map((t) => t.index).join("、") + " 轮含疑似密钥，未脱敏原样导出，确定吗？")) return;
+  if (!redact && risky.length && !acceptRisk && !confirm(msg("share.page.confirmRisk", { turns: risky.map((t) => t.index).join(LOCALE === "zh-CN" ? "、" : ", ") }))) return;
   // 前端确认通过（或显式重试）即声明接受风险；服务端仍独立复扫兜底。
   const accept = !!acceptRisk || risky.length > 0;
   const turns = [...selected].sort((a, b) => a - b);
-  setStatus(redact ? "脱敏处理中…" : "处理中…");
+  setStatus(redact ? msg("share.page.redacting") : msg("share.page.processing"));
   const body = JSON.stringify({ sessionId: detail.id, turns, format, action, redact, acceptRisk: accept, tools: $("tools").value });
   const r = await fetch("/api/export", { method: "POST", headers: { "content-type": "application/json" }, body });
   if (action === "download" && r.ok && r.headers.get("content-type") === "image/png") {
     const blob = await r.blob(); const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = "airgap-share.png";
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    setStatus(redact ? "PNG 已下载（已脱敏密钥）。" : "PNG 已下载。"); return;
+    setStatus(redact ? msg("share.page.downloadedRedacted") : msg("share.page.downloaded")); return;
   }
   const res = await r.json();
   // 服务端拦截（原样导出且命中，或有人绕过 UI）：确认后带 acceptRisk 重试一次。
   if (r.status === 409 && res.blocked) {
-    if (confirm(res.message + "\\n仍要原样导出吗？")) return doExport(action, format, true);
-    setStatus("已取消导出。", true); return;
+    if (confirm(res.message + "\\n" + msg("share.page.confirmAgain"))) return doExport(action, format, true);
+    setStatus(msg("share.page.cancelled"), true); return;
   }
   setStatus(res.message, !res.ok);
 }
@@ -419,12 +447,12 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("prefpan
 // 同时静默持久化到 config.json——先等预览刷新（用户在等它），保存失败的提示最后落地不被刷新提示覆盖。
 $("tools").onchange = async () => {
   const save = fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ toolDisplay: $("tools").value }) })
-    .then((r) => r.json()).catch(() => ({ ok: false, message: "工具展示偏好保存失败" }));
+    .then((r) => r.json()).catch(() => ({ ok: false, message: msg("share.page.toolSaveFailed") }));
   if (detail) await loadSession(detail.id, true);
   const res = await save;
-  if (!res.ok) setStatus(res.message || "工具展示偏好保存失败", true);
+  if (!res.ok) setStatus(res.message || msg("share.page.toolSaveFailed"), true);
 };
-$("done").onclick = async () => { await fetch("/api/close", { method: "POST" }); setStatus("已关闭，可以关掉这个标签页了。"); };
+$("done").onclick = async () => { await fetch("/api/close", { method: "POST" }); setStatus(msg("share.page.closed")); };
 
 loadSessions();
 </script>

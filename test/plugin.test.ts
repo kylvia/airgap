@@ -219,8 +219,10 @@ describe("quick-launch documentation", () => {
       expect(readme).toContain("alias ags='airgap share'");
       expect(readme).toContain("npm run build && npm link");
       expect(readme).toContain("loopback");
-      expect(readme).toContain("完成关闭");
     }
+    expect(englishShare).toContain("Done");
+    expect(chineseShare).toContain("完成关闭");
+    expect(pluginReadme).toMatch(/Done[\s\S]*完成关闭/);
     expect(englishShare).toMatch(/Raycast[\s\S]*Alfred[\s\S]*macOS Shortcuts/);
     expect(englishShare).toContain("ten minutes of inactivity");
     expect(englishShare).toContain("airgap itself does not stay resident");

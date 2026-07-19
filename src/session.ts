@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { JsonlRecord, RuleMatch, SessionInfo, Turn } from "./types.js";
 import { createRedactor } from "./redact.js";
+import { createI18n, type Locale } from "./i18n/index.js";
 import { streamLines, tryParse } from "./util/jsonl.js";
 
 /** Collapse all whitespace runs to single spaces and trim. */
@@ -22,7 +23,7 @@ export async function readRecords(file: string): Promise<JsonlRecord[]> {
  * appending fresh ai-title records even AFTER a rename, so a rename must win forever,
  * not just until the next ai-title) > latest ai-title > "<project> · 会话片段".
  */
-export function sessionTitle(records: JsonlRecord[], info: SessionInfo): string {
+export function sessionTitle(records: JsonlRecord[], info: SessionInfo, locale: Locale = "zh-CN"): string {
   let ai: string | null = null;
   for (let i = records.length - 1; i >= 0; i--) {
     const j = records[i]?.json;
@@ -36,7 +37,7 @@ export function sessionTitle(records: JsonlRecord[], info: SessionInfo): string 
   }
   if (ai !== null) return ai;
   const base = info.cwd ? path.basename(info.cwd) : info.project;
-  return `${base} · 会话片段`;
+  return `${base} · ${createI18n(locale).t("share.page.fallbackTitle")}`;
 }
 
 /**
@@ -143,11 +144,12 @@ export function redactTurns(turns: Turn[], scan: (s: string) => RuleMatch[]): { 
  * background task notifications, slash commands, image-only messages, IDE noise.
  * Returns "" for a normal user turn.
  */
-export function turnTag(userText: string): string {
+export function turnTag(userText: string, locale: Locale = "zh-CN"): string {
+  const i18n = createI18n(locale);
   const t = userText.trim();
-  if (t.startsWith("<task-notification") || t.startsWith("<task-id")) return "任务通知";
-  if (t.startsWith("[图片]") || t === "[图片]") return "图片";
-  if (t.startsWith("/")) return "命令";
-  if (t.startsWith("<ide_selection") || t.startsWith("<local-command") || t.startsWith("<command-name")) return "系统";
+  if (t.startsWith("<task-notification") || t.startsWith("<task-id")) return i18n.t("share.tag.task");
+  if (t.startsWith("[图片]") || t === "[图片]") return i18n.t("share.tag.image");
+  if (t.startsWith("/")) return i18n.t("share.tag.command");
+  if (t.startsWith("<ide_selection") || t.startsWith("<local-command") || t.startsWith("<command-name")) return i18n.t("share.tag.system");
   return "";
 }

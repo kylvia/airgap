@@ -25,11 +25,11 @@ describe("share picker manual refresh", () => {
     expect(source).toContain("if (manualRefreshInFlight) return;");
     expect(source).toContain("await refreshSessions()");
     expect(source).toContain(
-      'await loadSession(detail.id, true, "已刷新会话列表和当前会话内容。")',
+      'await loadSession(detail.id, true, msg("share.page.sessionRefreshed"))',
     );
     expect(source).toContain("button.disabled = false");
     expect(source).toContain('button.removeAttribute("aria-busy")');
-    expect(source).toContain('setStatus("会话数据刷新失败，请稍后重试。", true)');
+    expect(source).toContain('setStatus(msg("share.page.refreshFailed"), true)');
     expect(source).not.toMatch(/setInterval|WebSocket/);
   });
 });

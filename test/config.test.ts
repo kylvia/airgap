@@ -59,6 +59,11 @@ describe("loadConfig (~/.airgap/config.json)", () => {
     const cfg = await loadConfig(await homeWith('{"share":{"sessionListLimit":10,"bogus":1},"future":{}}'));
     expect(cfg).toEqual({ share: { sessionListLimit: 10 } });
   });
+
+  it("读取支持的顶层 language，非法值静默忽略", async () => {
+    expect(await loadConfig(await homeWith('{"language":"zh-CN"}'))).toEqual({ language: "zh-CN" });
+    expect(await loadConfig(await homeWith('{"language":"fr"}'))).toEqual({});
+  });
 });
 
 describe("updateShareConfig (share UI 设置面板的持久化)", () => {

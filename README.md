@@ -106,7 +106,22 @@ When you want to select a few turns, preview them, and export a long image / HTM
 airgap share
 ```
 
-The browser opens automatically. The server binds only to the loopback interface, so it does not accept remote connections. Click **完成关闭** on the page when finished; ten minutes of inactivity also stops the process. The picker runs only when invoked: airgap itself does not stay resident.
+The browser opens automatically. The server binds only to the loopback interface, so it does not accept remote connections. Click **Done** on the page when finished; ten minutes of inactivity also stops the process. The picker runs only when invoked: airgap itself does not stay resident.
+
+The Share flow supports English and Simplified Chinese. It uses `--lang`, then `AIRGAP_LANG`, then `~/.airgap/config.json`, then the system locale; unsupported locales fall back to English. One resolved language is used consistently by the terminal, picker, API messages, and HTML/Markdown/PNG exports:
+
+```sh
+airgap --lang en share
+AIRGAP_LANG=zh-CN airgap share
+```
+
+To persist the preference, add a top-level language setting:
+
+```json
+{
+  "language": "zh-CN"
+}
+```
 
 With the [local assistant plugin](./plugins/airgap/README.md) installed, an AI coding conversation becomes a one-step entry point:
 

@@ -15,6 +15,7 @@ import { renderMarkdown } from "../render/markdown.js";
 import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
 import { oneLine, peekTitle, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../session.js";
 import { renderPage } from "./page.js";
+import { createI18n, type Locale } from "../i18n/index.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
 
@@ -129,19 +130,19 @@ async function findSession(id: string): Promise<SessionInfo | null> {
   return sessions.find((s) => s.id === id) ?? pickSession(sessions, { session: id });
 }
 
-async function loadDetail(id: string, tools: ToolDisplay): Promise<SessionDetail | null> {
+async function loadDetail(id: string, tools: ToolDisplay, locale: Locale): Promise<SessionDetail | null> {
   const info = await findSession(id);
   if (!info) return null;
   const records = await readRecords(info.file);
   const turns = shareTurnsForDisplay(extractTurns(records, info.source), tools);
-  const title = sessionTitle(records, info);
+  const title = sessionTitle(records, info, locale);
   const lastTs = turns[turns.length - 1]?.timestamp;
   const date = (lastTs ?? new Date(info.mtimeMs).toISOString()).slice(0, 10);
   const turnData: TurnData[] = turns.map((t) => ({
     index: t.index,
     preview: oneLine(t.userText).slice(0, 60),
-    tag: turnTag(t.userText),
-    html: renderTurnBlock(t, { tools }),
+    tag: turnTag(t.userText, locale),
+    html: renderTurnBlock(t, { tools, locale }),
     // findings 始终扫全部字段（含 summary/none 下不渲染的 tool i/o）——从宽标记，与导出闸一致
     findings: scanOneTurn(t, scanString).length,
   }));
@@ -152,6 +153,7 @@ async function selectedTurns(
   id: string,
   want: number[],
   tools: ToolDisplay,
+  locale: Locale,
 ): Promise<{ info: SessionInfo; turns: Turn[]; title: string; date: string } | null> {
   const info = await findSession(id);
   if (!info) return null;
@@ -159,7 +161,7 @@ async function selectedTurns(
   const all = shareTurnsForDisplay(extractTurns(records, info.source), tools);
   const set = new Set(want);
   const turns = all.filter((t) => set.has(t.index));
-  const title = sessionTitle(records, info);
+  const title = sessionTitle(records, info, locale);
   const lastTs = turns[turns.length - 1]?.timestamp ?? all[all.length - 1]?.timestamp;
   const date = (lastTs ?? new Date(info.mtimeMs).toISOString()).slice(0, 10);
   return { info, turns, title, date };
@@ -192,6 +194,7 @@ async function pngToClipboard(pngPath: string): Promise<void> {
 interface ExportResult {
   ok: boolean;
   message: string;
+  code?: string;
   /** 服务端扫描拦下（含密钥且未 acceptRisk）：HTTP 层回 409，前端可确认后带 acceptRisk 重试 */
   blocked?: boolean;
   /** download 时的 PNG 字节 */
@@ -208,6 +211,7 @@ export function exportBlockReason(
   turns: Turn[],
   acceptRisk: boolean | undefined,
   scan: (s: string) => RuleMatch[] = scanString,
+  locale: Locale = "zh-CN",
 ): string | null {
   if (acceptRisk) return null;
   const findings = scanTurns(turns, scan);
@@ -216,23 +220,31 @@ export function exportBlockReason(
     .slice(0, 5)
     .map((f) => `${f.ruleId} ${f.preview}`)
     .join("、");
-  return `选中内容含 ${findings.length} 处疑似密钥（${brief}${findings.length > 5 ? " 等" : ""}）；确认无误可接受风险重新导出，或先用 airgap pack 走 redact。`;
+  const i18n = createI18n(locale);
+  return i18n.t("share.api.exportRisk", {
+    count: findings.length,
+    brief,
+    more: findings.length > 5 ? i18n.t("share.api.more") : "",
+  });
 }
 
-async function renderPng(turns: Turn[], title: string, date: string, tools: ToolDisplay): Promise<string> {
+async function renderPng(turns: Turn[], title: string, date: string, tools: ToolDisplay, locale: Locale): Promise<string> {
   const chrome = findChrome();
-  if (!chrome) throw new Error("没找到本机 Chrome/Chromium（出图需要它）。可设 CHROME_PATH，或改用「存桌面」的 HTML/Markdown。");
-  const html = renderHtml(turns, { title, date }, { tools });
+  if (!chrome) throw new Error(createI18n(locale).t("share.api.chromeMissing"));
+  const html = renderHtml(turns, { title, date }, { tools, locale });
   // 无空格英文临时名，避开 osascript 路径转义坑
   const pngPath = path.join(os.tmpdir(), `airgap-share-${randomUUID()}.png`);
   await renderPngViaChrome(html, pngPath, chrome);
   return pngPath;
 }
 
-async function handleExport(body: ExportBody): Promise<ExportResult> {
+async function handleExport(body: ExportBody, locale: Locale): Promise<ExportResult> {
+  const i18n = createI18n(locale);
   const tools = parseToolDisplay(body.tools);
-  const sel = await selectedTurns(body.sessionId, body.turns, tools);
-  if (!sel || sel.turns.length === 0) return { ok: false, message: "没有选中任何轮次" };
+  const sel = await selectedTurns(body.sessionId, body.turns, tools, locale);
+  if (!sel || sel.turns.length === 0) {
+    return { ok: false, code: "NO_TURNS_SELECTED", message: i18n.t("share.api.noSelection") };
+  }
   const { turns: rawTurns, title, date } = sel;
 
   // 脱敏后导出（UI 默认）：占位符替换，fail-closed 保证干净，无需再拦截。
@@ -242,10 +254,10 @@ async function handleExport(body: ExportBody): Promise<ExportResult> {
   if (body.redact) {
     const red = redactTurns(rawTurns, scanString);
     turns = red.turns;
-    if (red.count > 0) redactNote = `（已脱敏 ${red.count} 处疑似密钥）`;
+    if (red.count > 0) redactNote = i18n.t("share.api.redactedNote", { count: red.count });
   } else {
-    const blockReason = exportBlockReason(rawTurns, body.acceptRisk);
-    if (blockReason) return { ok: false, blocked: true, message: blockReason };
+    const blockReason = exportBlockReason(rawTurns, body.acceptRisk, scanString, locale);
+    if (blockReason) return { ok: false, blocked: true, code: "EXPORT_SECRET_RISK", message: blockReason };
   }
 
   // 存桌面：png / html / md 三格式
@@ -255,45 +267,45 @@ async function handleExport(body: ExportBody): Promise<ExportResult> {
     await mkdir(desktop, { recursive: true });
     const outPath = path.join(desktop, `airgap-share-${stamp()}.${body.format}`);
     if (body.format === "png") {
-      const png = await renderPng(turns, title, date, tools);
+      const png = await renderPng(turns, title, date, tools, locale);
       await writeFile(outPath, await readFile(png));
     } else if (body.format === "html") {
-      await writeFile(outPath, renderHtml(turns, { title, date }, { tools }), "utf8");
+      await writeFile(outPath, renderHtml(turns, { title, date }, { tools, locale }), "utf8");
     } else {
-      await writeFile(outPath, renderMarkdown(turns, { title, date }, { tools }), "utf8");
+      await writeFile(outPath, renderMarkdown(turns, { title, date }, { tools, locale }), "utf8");
     }
-    return { ok: true, message: `已存到 ${outPath}${redactNote}` };
+    return { ok: true, message: i18n.t("share.api.saved", { path: outPath, note: redactNote }) };
   }
 
   // 浏览器下载：回 PNG 字节
   if (body.action === "download") {
-    const png = await renderPng(turns, title, date, tools);
+    const png = await renderPng(turns, title, date, tools, locale);
     return { ok: true, message: "download", bytes: await readFile(png), filename: `airgap-share-${stamp()}.png` };
   }
 
   // 复制到剪贴板：png → 系统剪贴板；md → pbcopy 文本
   if (body.action === "clipboard") {
-    if (!isMac) return { ok: false, message: "复制到剪贴板目前仅 macOS 支持，请改用「下载」或「存桌面」。" };
+    if (!isMac) return { ok: false, code: "CLIPBOARD_UNSUPPORTED", message: i18n.t("share.api.clipboardMacOnly") };
     if (body.format === "md") {
-      await run("pbcopy", [], renderMarkdown(turns, { title, date }, { tools }));
-      return { ok: true, message: `Markdown 已复制到剪贴板${redactNote}，Cmd-V 粘贴。` };
+      await run("pbcopy", [], renderMarkdown(turns, { title, date }, { tools, locale }));
+      return { ok: true, message: i18n.t("share.api.markdownCopied", { note: redactNote }) };
     }
-    const png = await renderPng(turns, title, date, tools);
+    const png = await renderPng(turns, title, date, tools, locale);
     await pngToClipboard(png);
-    return { ok: true, message: `长图已复制到剪贴板${redactNote}，Cmd-V 粘贴。` };
+    return { ok: true, message: i18n.t("share.api.imageCopied", { note: redactNote }) };
   }
 
-  return { ok: false, message: "未知操作" };
+  return { ok: false, code: "UNKNOWN_ACTION", message: i18n.t("share.api.unknownAction") };
 }
 
 // ---------- HTTP ----------
 
-function readBody(req: IncomingMessage): Promise<string> {
+function readBody(req: IncomingMessage, locale: Locale): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = "";
     req.on("data", (c) => {
       data += c;
-      if (data.length > 5_000_000) reject(new Error("请求体过大"));
+      if (data.length > 5_000_000) reject(new Error(createI18n(locale).t("share.api.bodyTooLarge")));
     });
     req.on("end", () => resolve(data));
     req.on("error", reject);
@@ -311,7 +323,9 @@ export interface ShareServer {
   close(): void;
 }
 
-export async function startShareServer(opts: { port?: number; defaultSession?: string }): Promise<ShareServer> {
+export async function startShareServer(opts: { port?: number; defaultSession?: string; locale?: Locale }): Promise<ShareServer> {
+  const locale = opts.locale ?? "zh-CN";
+  const i18n = createI18n(locale);
   // 启动时读 config；页面设置面板经 POST /api/config 持久化并即时更新这里
   const bootCfg = await loadConfig();
   let listLimit = sessionListLimit(bootCfg);
@@ -321,7 +335,7 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       // eslint-disable-next-line no-console
-      console.log("airgap share: 空闲超时，已自动关闭。");
+      console.log(i18n.t("share.server.idle"));
       server.close();
       process.exit(0);
     }, IDLE_TIMEOUT_MS);
@@ -330,7 +344,8 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
   const server: Server = createServer((req, res) => {
     touch();
     void handle(req, res).catch((err: unknown) => {
-      sendJson(res, 500, { ok: false, message: err instanceof Error ? err.message : String(err) });
+      console.error(err instanceof Error ? err.message : String(err));
+      sendJson(res, 500, { ok: false, code: "INTERNAL_ERROR", message: i18n.t("share.api.internal") });
     });
   });
 
@@ -339,7 +354,7 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
     const p = url.pathname;
 
     if (req.method === "GET" && p === "/") {
-      const html = renderPage(opts.defaultSession, toolDisplay, isMac);
+      const html = renderPage(opts.defaultSession, toolDisplay, isMac, locale);
       const buf = Buffer.from(html, "utf8");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-length": buf.length });
       res.end(buf);
@@ -352,24 +367,24 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
       return;
     }
     if (req.method === "POST" && p === "/api/config") {
-      const body = JSON.parse(await readBody(req)) as { sessionListLimit?: unknown; toolDisplay?: unknown };
+      const body = JSON.parse(await readBody(req, locale)) as { sessionListLimit?: unknown; toolDisplay?: unknown };
       const patch: { sessionListLimit?: number; toolDisplay?: ToolDisplay } = {};
       if (body.sessionListLimit !== undefined) {
         if (typeof body.sessionListLimit !== "number" || !Number.isInteger(body.sessionListLimit)) {
-          sendJson(res, 400, { ok: false, message: "sessionListLimit 需要整数" });
+          sendJson(res, 400, { ok: false, code: "INVALID_SESSION_LIST_LIMIT", message: i18n.t("share.api.configInteger") });
           return;
         }
         patch.sessionListLimit = body.sessionListLimit;
       }
       if (body.toolDisplay !== undefined) {
         if (typeof body.toolDisplay !== "string" || !(TOOL_DISPLAYS as readonly string[]).includes(body.toolDisplay)) {
-          sendJson(res, 400, { ok: false, message: `toolDisplay 只接受 ${TOOL_DISPLAYS.join(" | ")}` });
+          sendJson(res, 400, { ok: false, code: "INVALID_TOOL_DISPLAY", message: i18n.t("share.api.configToolDisplay", { values: TOOL_DISPLAYS.join(" | ") }) });
           return;
         }
         patch.toolDisplay = body.toolDisplay as ToolDisplay;
       }
       if (patch.sessionListLimit === undefined && patch.toolDisplay === undefined) {
-        sendJson(res, 400, { ok: false, message: "没有可保存的配置项" });
+        sendJson(res, 400, { ok: false, code: "EMPTY_CONFIG_PATCH", message: i18n.t("share.api.configEmpty") });
         return;
       }
       try {
@@ -378,23 +393,23 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
         toolDisplay = saved.toolDisplay;
         sendJson(res, 200, { ok: true, limit: listLimit, toolDisplay });
       } catch (err) {
-        sendJson(res, 500, { ok: false, message: err instanceof Error ? err.message : String(err) });
+        sendJson(res, 500, { ok: false, code: "CONFIG_SAVE_FAILED", message: i18n.t("share.api.configSaveFailed") });
       }
       return;
     }
     if (req.method === "GET" && p.startsWith("/api/session/")) {
       const id = decodeURIComponent(p.slice("/api/session/".length));
-      const detail = await loadDetail(id, parseToolDisplay(url.searchParams.get("tools")));
+      const detail = await loadDetail(id, parseToolDisplay(url.searchParams.get("tools")), locale);
       if (!detail) {
-        sendJson(res, 404, { message: "找不到该会话" });
+        sendJson(res, 404, { code: "SESSION_NOT_FOUND", message: i18n.t("share.api.sessionNotFound") });
         return;
       }
       sendJson(res, 200, detail);
       return;
     }
     if (req.method === "POST" && p === "/api/export") {
-      const body = JSON.parse(await readBody(req)) as ExportBody;
-      const result = await handleExport(body);
+      const body = JSON.parse(await readBody(req, locale)) as ExportBody;
+      const result = await handleExport(body, locale);
       if (result.ok && result.bytes) {
         res.writeHead(200, {
           "content-type": "image/png",
@@ -405,7 +420,7 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
         return;
       }
       const status = result.ok ? 200 : result.blocked ? 409 : 400;
-      sendJson(res, status, { ok: result.ok, blocked: result.blocked, message: result.message });
+      sendJson(res, status, { ok: result.ok, blocked: result.blocked, code: result.code, message: result.message });
       return;
     }
     if (req.method === "POST" && p === "/api/close") {
@@ -416,7 +431,7 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
       }, 100);
       return;
     }
-    sendJson(res, 404, { message: "not found" });
+    sendJson(res, 404, { code: "NOT_FOUND", message: i18n.t("share.api.notFound") });
   }
 
   const port = await listen(server, opts.port);
