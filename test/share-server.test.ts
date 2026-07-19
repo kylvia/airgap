@@ -62,7 +62,7 @@ describe("renderPage (share picker shell)", () => {
   });
 
   it("关键 DOM/JS 锚点齐全（design.md 清单）", () => {
-    for (const id of ["sess", "sbanner", "list", "preview", "status", "count", "all", "none", "done", "tools", "redact", "loading", "limit", "sid", "prefs", "prefpanel"]) {
+    for (const id of ["sess", "sbanner", "list", "preview", "status", "count", "all", "none", "done", "tools", "language", "redact", "loading", "limit", "sid", "prefs", "prefpanel"]) {
       expect(page).toContain(`id="${id}"`);
     }
     expect(page).toContain('data-a="clipboard"');
@@ -89,6 +89,24 @@ describe("renderPage internationalization", () => {
   it("escapes strings before embedding them in an inline script", () => {
     expect(serializeForScript({ value: "</script><script>alert(1)</script>" })).not.toContain("</script>");
     expect(serializeForScript({ value: "</script>" })).toContain("\\u003c/script>");
+  });
+
+  it("renders a localized language preference selector and reload flow", () => {
+    const page = renderPage(undefined, "summary", true, "en", "auto");
+    expect(page).toContain('id="language"');
+    expect(page).toMatch(/<option value="auto" selected>Follow system<\/option>/);
+    expect(page).toContain('<option value="zh-CN">Simplified Chinese</option>');
+    expect(page).toContain('<option value="en">English</option>');
+    expect(page).toContain('JSON.stringify({ language: $("language").value })');
+    expect(page).toContain("window.location.reload()");
+    expect(page).toContain('$("language").value = LANGUAGE_PREFERENCE');
+  });
+
+  it("selects the current explicit Chinese preference", () => {
+    const page = renderPage(undefined, "summary", true, "zh-CN", "zh-CN");
+    expect(page).toContain('<option value="zh-CN" selected>简体中文</option>');
+    expect(page).toContain('<option value="auto">跟随系统</option>');
+    expect(page).toContain('<option value="en">英文</option>');
   });
 });
 

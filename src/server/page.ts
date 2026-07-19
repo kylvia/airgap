@@ -1,6 +1,6 @@
 import { CHAT_CSS, airgapMark, escapeHtml } from "../render/html.js";
 import { THEME_CSS } from "../render/theme.js";
-import { createI18n, type Locale } from "../i18n/index.js";
+import { createI18n, type LanguagePreference, type Locale } from "../i18n/index.js";
 
 export function serializeForScript(value: unknown): string {
   return JSON.stringify(value)
@@ -21,6 +21,7 @@ export function renderPage(
   toolDisplay = "summary",
   isMac = true,
   locale: Locale = "zh-CN",
+  languagePreference: LanguagePreference = locale,
 ): string {
   const i18n = createI18n(locale);
   const t = (key: string, params?: Record<string, string | number>): string => i18n.t(key, params);
@@ -41,6 +42,12 @@ export function renderPage(
   const prefsMark = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="10.5" cy="4.5" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/><circle cx="5.5" cy="8" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="11.5" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/></svg>';
   const toolsOptions = (["none", "summary", "full"] as const)
     .map((v) => `<option value="${v}"${v === toolDisplay ? " selected" : ""}>${escapeHtml(t(`share.page.tool.${v}`))}</option>`)
+    .join("");
+  const languageOptions = (["auto", "zh-CN", "en"] as const)
+    .map((value) => {
+      const key = value === "zh-CN" ? "zhCN" : value;
+      return `<option value="${value}"${value === languagePreference ? " selected" : ""}>${escapeHtml(t(`share.page.language.${key}`))}</option>`;
+    })
     .join("");
   return `<!DOCTYPE html>
 <html lang="${locale}">
@@ -157,6 +164,7 @@ ${THEME_CSS}
         <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
       </select></div>
       <div class="prow"><span>${escapeHtml(t("share.page.toolDisplay"))}</span><select id="tools">${toolsOptions}</select></div>
+      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>
     </div>
   </header>
   <div class="sbanner" id="sbanner"></div>
@@ -184,6 +192,7 @@ ${THEME_CSS}
 const CHAT_CSS = ${chatCss};
 const DEFAULT = ${def};
 const LOCALE = ${JSON.stringify(locale)};
+const LANGUAGE_PREFERENCE = ${JSON.stringify(languagePreference)};
 const M = ${serializeForScript(messages)};
 function msg(key, params = {}) {
   const singularKey = params.count === 1 ? key + ".one" : "";
@@ -452,6 +461,20 @@ $("tools").onchange = async () => {
   if (detail) await loadSession(detail.id, true);
   const res = await save;
   if (!res.ok) setStatus(res.message || msg("share.page.toolSaveFailed"), true);
+};
+$("language").onchange = async () => {
+  const r = await fetch("/api/config", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ language: $("language").value }),
+  });
+  const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.languageSaveFailed") }));
+  if (!res.ok) {
+    $("language").value = LANGUAGE_PREFERENCE;
+    setStatus(res.message || msg("share.page.languageSaveFailed"), true);
+    return;
+  }
+  window.location.reload();
 };
 $("done").onclick = async () => { await fetch("/api/close", { method: "POST" }); setStatus(msg("share.page.closed")); };
 
