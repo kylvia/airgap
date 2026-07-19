@@ -1,4 +1,4 @@
-import { Command, CommanderError } from "commander";
+import { Command } from "commander";
 import { describe, expect, it, vi } from "vitest";
 import { registerUpdateCheckHook } from "../src/cli.js";
 import { createI18n } from "../src/i18n/index.js";
@@ -44,20 +44,45 @@ describe("registerUpdateCheckHook", () => {
     expect(seen?.i18n.locale).toBe("zh-CN");
   });
 
-  it("does not run the action hook for help", async () => {
+  it.each([
+    ["help", ["probe", "--help"]],
+    ["version", ["--version"]],
+    ["empty invocation", []],
+    ["invalid command", ["unknown"]],
+  ])("does not run the action hook for %s", async (_label, argv) => {
     const check = vi.fn(async (_options: UpdateCheckOptions) => undefined);
-    const program = quietProgram();
+    const program = quietProgram().version("0.2.0");
     program.command("probe").action(() => undefined);
     registerUpdateCheckHook(program, {
       currentVersion: "0.2.0",
       i18n: createI18n("en"),
       config: {},
-      argv: ["probe", "--help"],
+      argv,
       check,
     });
 
-    await expect(program.parseAsync(["node", "airgap", "probe", "--help"]))
-      .rejects.toBeInstanceOf(CommanderError);
+    await program.parseAsync(["node", "airgap", ...argv]).catch(() => undefined);
     expect(check).not.toHaveBeenCalled();
+  });
+
+  it("continues into the business action when the update checker rejects", async () => {
+    const events: string[] = [];
+    const program = quietProgram();
+    program.command("probe").action(() => {
+      events.push("action");
+    });
+    registerUpdateCheckHook(program, {
+      currentVersion: "0.2.0",
+      i18n: createI18n("en"),
+      config: {},
+      argv: ["probe"],
+      check: async () => {
+        events.push("check");
+        throw new Error("checker failed");
+      },
+    });
+
+    await expect(program.parseAsync(["node", "airgap", "probe"])).resolves.toBeDefined();
+    expect(events).toEqual(["check", "action"]);
   });
 });

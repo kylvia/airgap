@@ -162,7 +162,7 @@ npx airgap doctor
 
 ## 版本更新提示
 
-在交互式终端中，airgap 每 24 小时最多向 npm 官方 Registry（`registry.npmjs.org`）检查一次新版本。请求只包含常规 HTTPS 元数据和当前 airgap 版本；不会读取或发送会话内容、项目名、文件路径或配置值。检查失败会静默跳过，airgap 也绝不会自动安装更新。
+在交互式终端中，airgap 通常每 24 小时最多向 npm 官方 Registry（`registry.npmjs.org`）检查一次新版本；如果多个进程同时启动，它们可能在共享缓存更新前各检查一次。请求只包含常规 HTTPS 元数据和当前 airgap 版本，不会携带会话内容、项目名、文件路径或配置值。检查失败会静默跳过，airgap 也绝不会自动安装更新。
 
 发现新版本后，由用户明确执行升级：
 

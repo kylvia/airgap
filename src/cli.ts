@@ -28,14 +28,18 @@ export function registerUpdateCheckHook(
   options: UpdateCheckHookOptions,
 ): void {
   program.hook("preAction", async () => {
-    await (options.check ?? checkForUpdate)({
-      currentVersion: options.currentVersion,
-      i18n: options.i18n,
-      argv: options.argv,
-      env: process.env,
-      configEnabled: options.config.updateCheck,
-      stdoutIsTTY: process.stdout.isTTY,
-      stderrIsTTY: process.stderr.isTTY,
-    });
+    try {
+      await (options.check ?? checkForUpdate)({
+        currentVersion: options.currentVersion,
+        i18n: options.i18n,
+        argv: options.argv,
+        env: process.env,
+        configEnabled: options.config.updateCheck,
+        stdoutIsTTY: process.stdout.isTTY,
+        stderrIsTTY: process.stderr.isTTY,
+      });
+    } catch {
+      // Update discovery is advisory and must never block the requested command.
+    }
   });
 }

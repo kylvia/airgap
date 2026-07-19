@@ -45,8 +45,9 @@ https://registry.npmjs.org/airgap/latest
 ```
 
 The request includes only ordinary HTTPS metadata and an Airgap version
-User-Agent. Airgap does not read or attach session data, filesystem paths,
-project names, or configuration contents.
+User-Agent. Eligibility reads the `updateCheck` preference, but the registry
+request does not attach session data, filesystem paths, project names, or
+configuration contents.
 
 ## Eligibility
 

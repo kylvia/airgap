@@ -162,7 +162,7 @@ Prints the local `claude` / `codex` versions and the per-format support matrix (
 
 ## Update notices
 
-In an interactive terminal, airgap checks the official npm registry at `registry.npmjs.org` for a newer release at most once every 24 hours. The request sends normal HTTPS metadata and the running airgap version; it never reads or sends session contents, project names, filesystem paths, or configuration values. A failed check is silent, and airgap never installs an update automatically.
+In an interactive terminal, airgap normally checks the official npm registry at `registry.npmjs.org` for a newer release no more than once every 24 hours. Simultaneous launches may each check before the shared cache is updated. The request sends normal HTTPS metadata and the running airgap version; it never includes session contents, project names, filesystem paths, or configuration values. A failed check is silent, and airgap never installs an update automatically.
 
 When a newer release exists, upgrade explicitly:
 
