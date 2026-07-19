@@ -108,7 +108,7 @@ airgap share
 
 The browser opens automatically. The server binds only to the loopback interface, so it does not accept remote connections. Click **Done** on the page when finished; ten minutes of inactivity also stops the process. The picker runs only when invoked: airgap itself does not stay resident.
 
-The Share flow supports English and Simplified Chinese. It uses `--lang`, then `AIRGAP_LANG`, then `~/.airgap/config.json`, then the system locale; unsupported locales fall back to English. One resolved language is used consistently by the terminal, picker, API messages, and HTML/Markdown/PNG exports:
+The Share flow supports English and Simplified Chinese. It uses `--lang`, then `AIRGAP_LANG`, then `~/.airgap/config.json`, then the system's preferred UI language; unsupported locales fall back to English. Automatic detection reads macOS `AppleLanguages`, Windows' Node.js `Intl` locale, or Linux `LC_ALL` / `LC_MESSAGES` / `LANG` (in that order). One resolved language is used consistently by the terminal, picker, API messages, and HTML/Markdown/PNG exports:
 
 ```sh
 airgap --lang en share
@@ -122,6 +122,8 @@ To persist the preference, add a top-level language setting:
   "language": "zh-CN"
 }
 ```
+
+An automatically detected language is used for that run and is never written to the config file. Run `airgap doctor` to see the language source, detected locale, and final resolved locale.
 
 With the [local assistant plugin](./plugins/airgap/README.md) installed, an AI coding conversation becomes a one-step entry point:
 

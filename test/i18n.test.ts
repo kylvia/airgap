@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createI18n, normalizeLocale, resolveLocale } from "../src/i18n/index.js";
+import {
+  createI18n,
+  normalizeLocale,
+  resolveLocale,
+  resolveLocaleSelection,
+} from "../src/i18n/index.js";
 
 describe("normalizeLocale", () => {
   it("normalizes supported English and Simplified Chinese locale forms", () => {
@@ -29,6 +34,42 @@ describe("resolveLocale", () => {
   it("falls back to English when an explicit higher-priority value is unsupported", () => {
     expect(resolveLocale({ cli: "fr", config: "zh-CN" })).toBe("en");
     expect(resolveLocale({ env: "de", config: "zh-CN" })).toBe("en");
+  });
+});
+
+describe("resolveLocaleSelection", () => {
+  it("reports the winning explicit source and raw locale", () => {
+    expect(
+      resolveLocaleSelection(
+        { cli: "zh-Hans-CN", env: "en", config: "en", system: "en-US" },
+        "macOS AppleLanguages",
+      ),
+    ).toEqual({ locale: "zh-CN", source: "--lang", detectedLocale: "zh-Hans-CN" });
+    expect(resolveLocaleSelection({ env: "zh_CN.UTF-8", config: "en" })).toEqual({
+      locale: "zh-CN",
+      source: "AIRGAP_LANG",
+      detectedLocale: "zh_CN.UTF-8",
+    });
+    expect(resolveLocaleSelection({ config: "en-GB" })).toEqual({
+      locale: "en",
+      source: "config.language",
+      detectedLocale: "en-GB",
+    });
+  });
+
+  it("reports the supplied system source", () => {
+    expect(resolveLocaleSelection({ system: "zh-Hans-CN" }, "macOS AppleLanguages")).toEqual({
+      locale: "zh-CN",
+      source: "macOS AppleLanguages",
+      detectedLocale: "zh-Hans-CN",
+    });
+  });
+
+  it("reports an English fallback when no locale is available", () => {
+    expect(resolveLocaleSelection({})).toEqual({
+      locale: "en",
+      source: "English fallback",
+    });
   });
 });
 

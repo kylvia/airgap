@@ -1,6 +1,9 @@
 export const en = {
   "program.description": "Scan, redact, and carry your local AI coding sessions. No cloud, no accounts.",
   "program.langOption": "UI language: en | zh-CN",
+  "doctor.languageSource": "language source",
+  "doctor.detectedLocale": "detected locale",
+  "doctor.resolvedLocale": "resolved locale",
   "share.cli.noSessions": "No local sessions found in ~/.claude or ~/.codex.",
   "share.cli.started": "airgap share started: {url}",
   "share.cli.browser": "  The browser opens automatically. If it does not, open the URL above.",

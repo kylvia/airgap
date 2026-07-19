@@ -1,6 +1,12 @@
 import { en } from "./locales/en.js";
 import { zhCN } from "./locales/zh-CN.js";
-import { normalizeLocale, resolveLocale, type LocaleInputs } from "./resolve.js";
+import {
+  normalizeLocale,
+  resolveLocale,
+  resolveLocaleSelection,
+  type LocaleInputs,
+  type LocaleSelection,
+} from "./resolve.js";
 import type { I18n, Locale, MessageParams } from "./types.js";
 
 const catalogs: Record<Locale, Record<string, string>> = { en, "zh-CN": zhCN };
@@ -25,5 +31,5 @@ export function createI18n(locale: Locale): I18n {
   };
 }
 
-export { normalizeLocale, resolveLocale };
-export type { I18n, Locale, LocaleInputs, MessageParams };
+export { normalizeLocale, resolveLocale, resolveLocaleSelection };
+export type { I18n, Locale, LocaleInputs, LocaleSelection, MessageParams };

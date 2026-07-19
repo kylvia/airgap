@@ -3,6 +3,9 @@ import type { en } from "./en.js";
 export const zhCN = {
   "program.description": "扫描、脱敏并迁移本地 AI 编码会话。不上云，不要账号。",
   "program.langOption": "界面语言：en | zh-CN",
+  "doctor.languageSource": "语言来源",
+  "doctor.detectedLocale": "检测语言",
+  "doctor.resolvedLocale": "最终语言",
   "share.cli.noSessions": "没发现任何本地会话（~/.claude 或 ~/.codex）。",
   "share.cli.started": "airgap share 已启动：{url}",
   "share.cli.browser": "  浏览器会自动打开；没弹出就手动点上面的地址。",

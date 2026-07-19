@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import pc from "picocolors";
 import type { Command } from "commander";
+import type { I18n, LocaleSelection } from "../i18n/index.js";
 
 const require = createRequire(import.meta.url);
 
@@ -32,23 +33,40 @@ export function probeToolVersion(cmd: string, timeoutMs = 3000): Promise<string 
   });
 }
 
-export function registerDoctor(program: Command): void {
+interface DoctorDependencies {
+  probe?: (command: string) => Promise<string | null>;
+  log?: (line: string) => void;
+}
+
+export async function runDoctor(
+  language: LocaleSelection,
+  i18n: I18n,
+  dependencies: DoctorDependencies = {},
+): Promise<void> {
+  const probe = dependencies.probe ?? probeToolVersion;
+  const log = dependencies.log ?? console.log;
+  const [claudeV, codexV] = await Promise.all([probe("claude"), probe("codex")]);
+  const row = (label: string, value: string | null): string =>
+    `  ${label.padEnd(10)} ${value ? pc.green(value) : pc.yellow("未检测到（不在 PATH 或超时）")}`;
+
+  log(pc.bold("airgap doctor"));
+  log(row("airgap", airgapVersion()));
+  log(row("claude", claudeV));
+  log(row("codex", codexV));
+  log("");
+  log(`  ${i18n.t("doctor.languageSource")}: ${language.source}`);
+  log(`  ${i18n.t("doctor.detectedLocale")}: ${language.detectedLocale ?? "—"}`);
+  log(`  ${i18n.t("doctor.resolvedLocale")}: ${language.locale}`);
+  log("");
+  log(pc.bold("支持矩阵"));
+  log(`  claude-jsonl-tree/1  scan ✓  pack ✓  open ✓  show ✓（实测 2.1.197/198）`);
+  log(`  codex-rollout/1      scan ✓  pack ✓  open ✗（暂无 resume 注入路径）  show ✓`);
+  log(pc.dim("  open 后若 claude --resume <sessionId> 找不到会话，用输出里的兜底命令（--fork-session）。"));
+}
+
+export function registerDoctor(program: Command, language: LocaleSelection, i18n: I18n): void {
   program
     .command("doctor")
     .description("Environment check: local claude/codex versions and the format support matrix")
-    .action(async () => {
-      const [claudeV, codexV] = await Promise.all([probeToolVersion("claude"), probeToolVersion("codex")]);
-      const row = (label: string, value: string | null): string =>
-        `  ${label.padEnd(10)} ${value ? pc.green(value) : pc.yellow("未检测到（不在 PATH 或超时）")}`;
-
-      console.log(pc.bold("airgap doctor"));
-      console.log(row("airgap", airgapVersion()));
-      console.log(row("claude", claudeV));
-      console.log(row("codex", codexV));
-      console.log("");
-      console.log(pc.bold("支持矩阵"));
-      console.log(`  claude-jsonl-tree/1  scan ✓  pack ✓  open ✓  show ✓（实测 2.1.197/198）`);
-      console.log(`  codex-rollout/1      scan ✓  pack ✓  open ✗（暂无 resume 注入路径）  show ✓`);
-      console.log(pc.dim("  open 后若 claude --resume <sessionId> 找不到会话，用输出里的兜底命令（--fork-session）。"));
-    });
+    .action(async () => runDoctor(language, i18n));
 }

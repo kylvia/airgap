@@ -7,6 +7,12 @@ export interface LocaleInputs {
   system?: string;
 }
 
+export interface LocaleSelection {
+  locale: Locale;
+  source: string;
+  detectedLocale?: string;
+}
+
 export function normalizeLocale(value?: string): Locale | undefined {
   if (!value) return undefined;
   const normalized = value.trim().replace(/\..*$/, "").replace(/_/g, "-");
@@ -15,9 +21,35 @@ export function normalizeLocale(value?: string): Locale | undefined {
   return undefined;
 }
 
-export function resolveLocale(inputs: LocaleInputs): Locale {
-  for (const value of [inputs.cli, inputs.env, inputs.config]) {
-    if (value !== undefined && value.trim() !== "") return normalizeLocale(value) ?? "en";
+export function resolveLocaleSelection(
+  inputs: LocaleInputs,
+  systemSource = "system locale",
+): LocaleSelection {
+  const explicitInputs: Array<[value: string | undefined, source: string]> = [
+    [inputs.cli, "--lang"],
+    [inputs.env, "AIRGAP_LANG"],
+    [inputs.config, "config.language"],
+  ];
+
+  for (const [value, source] of explicitInputs) {
+    const detectedLocale = value?.trim();
+    if (detectedLocale) {
+      return { locale: normalizeLocale(detectedLocale) ?? "en", source, detectedLocale };
+    }
   }
-  return normalizeLocale(inputs.system) ?? "en";
+
+  const detectedLocale = inputs.system?.trim();
+  if (detectedLocale) {
+    return {
+      locale: normalizeLocale(detectedLocale) ?? "en",
+      source: systemSource,
+      detectedLocale,
+    };
+  }
+
+  return { locale: "en", source: "English fallback" };
+}
+
+export function resolveLocale(inputs: LocaleInputs): Locale {
+  return resolveLocaleSelection(inputs).locale;
 }

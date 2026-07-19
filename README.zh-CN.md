@@ -108,7 +108,7 @@ airgap share
 
 浏览器会自动打开。服务只绑定 loopback（本机回环地址），不接受远程连接；用完点本页的 **完成关闭**，或空闲 10 分钟后自动退出。airgap 自身不常驻，只在你唤起时运行。
 
-Share 链路支持英文和简体中文。语言优先级依次是 `--lang`、`AIRGAP_LANG`、`~/.airgap/config.json`、系统语言；不支持的语言回落英文。终端提示、选择器、API 提示及 HTML/Markdown/PNG 导出物始终使用同一次解析出的语言：
+Share 链路支持英文和简体中文。语言优先级依次是 `--lang`、`AIRGAP_LANG`、`~/.airgap/config.json`、系统首选界面语言；不支持的语言回落英文。自动探测在 macOS 读取 `AppleLanguages`，Windows 读取 Node.js `Intl` 语言，Linux 依次读取 `LC_ALL` / `LC_MESSAGES` / `LANG`。终端提示、选择器、API 提示及 HTML/Markdown/PNG 导出物始终使用同一次解析出的语言：
 
 ```sh
 airgap --lang zh-CN share
@@ -122,6 +122,8 @@ AIRGAP_LANG=en airgap share
   "language": "zh-CN"
 }
 ```
+
+自动探测结果只对本次运行生效，不会写入配置文件。运行 `airgap doctor` 可查看语言来源、检测语言和最终语言。
 
 安装[本地助手插件](./plugins/airgap/README.md)后，在 AI 编码对话里也能一步唤起：
 

@@ -8,24 +8,20 @@ import { registerShare } from "./commands/share.js";
 import { registerDoctor } from "./commands/doctor.js";
 import { extractLangArg } from "./cli.js";
 import { loadConfig } from "./config.js";
-import { createI18n, resolveLocale } from "./i18n/index.js";
+import { createI18n } from "./i18n/index.js";
+import { resolveLanguage } from "./i18n/system.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
 
 async function main(): Promise<void> {
   const config = await loadConfig();
-  const locale = resolveLocale({
+  const language = await resolveLanguage({
     cli: extractLangArg(process.argv.slice(2)),
     env: process.env["AIRGAP_LANG"],
     config: config.language,
-    system:
-      process.env["LC_ALL"] ||
-      process.env["LC_MESSAGES"] ||
-      process.env["LANG"] ||
-      Intl.DateTimeFormat().resolvedOptions().locale,
   });
-  const i18n = createI18n(locale);
+  const i18n = createI18n(language.locale);
   const program = new Command();
 
   program
@@ -39,7 +35,7 @@ async function main(): Promise<void> {
   registerOpen(program);
   registerShow(program);
   registerShare(program, i18n);
-  registerDoctor(program);
+  registerDoctor(program, language, i18n);
 
   await program.parseAsync(process.argv);
 }
