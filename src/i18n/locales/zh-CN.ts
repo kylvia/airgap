@@ -108,6 +108,7 @@ export const zhCN = {
   "share.api.configInteger": "sessionListLimit 需要整数",
   "share.api.configToolDisplay": "toolDisplay 只接受 {values}",
   "share.api.configLanguage": "language 只接受 {values}",
+  "share.api.configBody": "配置请求体必须是对象",
   "share.api.configEmpty": "没有可保存的配置项",
   "share.api.configSaveFailed": "设置保存失败，请检查 ~/.airgap/config.json。",
   "share.api.sessionNotFound": "找不到该会话",

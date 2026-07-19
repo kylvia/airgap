@@ -143,6 +143,28 @@ describe("updateConfig (语言与 Share 设置的原子持久化)", () => {
     await expect(updateConfig({ language: "en" }, home)).rejects.toThrow(/无法解析/);
     await expect(readFile(path.join(home, ".airgap", "config.json"), "utf8")).resolves.toBe("{ broken");
   });
+
+  it("串行合并并发的语言、列表和工具设置，不丢未知键或损坏 JSON", async () => {
+    const home = await homeWith(
+      '{"future":{"keep":true},"share":{"sessionListLimit":10,"toolDisplay":"summary","other":"keep"}}',
+    );
+    await Promise.all(
+      Array.from({ length: 30 }, (_, index) => {
+        if (index % 3 === 0) return updateConfig({ language: "zh-CN" }, home);
+        if (index % 3 === 1) return updateConfig({ sessionListLimit: 50 }, home);
+        return updateConfig({ toolDisplay: "full" }, home);
+      }),
+    );
+
+    const raw = JSON.parse(
+      await readFile(path.join(home, ".airgap", "config.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(raw).toEqual({
+      language: "zh-CN",
+      future: { keep: true },
+      share: { sessionListLimit: 50, toolDisplay: "full", other: "keep" },
+    });
+  });
 });
 
 describe("share.toolDisplay 加载", () => {

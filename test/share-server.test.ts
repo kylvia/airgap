@@ -118,7 +118,17 @@ describe("renderPage internationalization", () => {
     expect(page).toContain('<option value="en">English</option>');
     expect(page).toContain('JSON.stringify({ language: $("language").value })');
     expect(page).toContain("window.location.reload()");
-    expect(page).toContain('$("language").value = LANGUAGE_PREFERENCE');
+    expect(page).toContain("select.value = LANGUAGE_PREFERENCE");
+    const handler = page.slice(
+      page.indexOf('$("language").onchange'),
+      page.indexOf('$("done").onclick'),
+    );
+    expect(handler).toContain('const select = $("language")');
+    expect(handler).toContain("select.disabled = true");
+    expect(handler).toContain("try {");
+    expect(handler).toContain("} catch {");
+    expect(handler).toContain("select.value = LANGUAGE_PREFERENCE");
+    expect(handler).toContain("select.disabled = false");
   });
 
   it("selects the current explicit Chinese preference", () => {
@@ -214,6 +224,21 @@ describe("Share server locale wiring", () => {
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({ code: "INVALID_LANGUAGE" });
       expect(await fetch(server.url).then((result) => result.text())).toContain('<html lang="en">');
+    } finally {
+      server.close();
+    }
+  });
+
+  it("rejects a null config request body as a stable client error", async () => {
+    const server = await startShareServer({ locale: "en", configHome: await tempHome() });
+    try {
+      const response = await fetch(new URL("/api/config", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "null",
+      });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ code: "INVALID_CONFIG_BODY" });
     } finally {
       server.close();
     }

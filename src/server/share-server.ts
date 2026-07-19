@@ -395,7 +395,16 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
       return;
     }
     if (req.method === "POST" && p === "/api/config") {
-      const body = JSON.parse(await readBody(req, requestLocale)) as {
+      const parsedBody: unknown = JSON.parse(await readBody(req, requestLocale));
+      if (typeof parsedBody !== "object" || parsedBody === null || Array.isArray(parsedBody)) {
+        sendJson(res, 400, {
+          ok: false,
+          code: "INVALID_CONFIG_BODY",
+          message: requestI18n.t("share.api.configBody"),
+        });
+        return;
+      }
+      const body = parsedBody as {
         language?: unknown;
         sessionListLimit?: unknown;
         toolDisplay?: unknown;

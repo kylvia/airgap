@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ToolDisplay } from "./types.js";
@@ -82,15 +83,30 @@ export interface ConfigUpdateResult {
   toolDisplay: ToolDisplay;
 }
 
+const configUpdateQueues = new Map<string, Promise<unknown>>();
+
 /**
  * 读-改-写 share.* 配置（share UI 的设置面板走这里持久化）：
  * 只动 patch 里给出的键，文件里的其他键（含未知键）原样保留；目录不存在则创建。
  * 文件存在但解析不了时**拒绝覆盖**（宁可保存失败，不销毁用户手写的配置）。
  * 返回写入后的最终 share 生效值。
  */
-export async function updateConfig(
+export function updateConfig(
   patch: ConfigPatch,
   home: string = os.homedir(),
+): Promise<ConfigUpdateResult> {
+  const file = path.join(home, ".airgap", "config.json");
+  const previous = configUpdateQueues.get(file) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(() => updateConfigUnlocked(patch, home));
+  configUpdateQueues.set(file, next);
+  return next.finally(() => {
+    if (configUpdateQueues.get(file) === next) configUpdateQueues.delete(file);
+  });
+}
+
+async function updateConfigUnlocked(
+  patch: ConfigPatch,
+  home: string,
 ): Promise<ConfigUpdateResult> {
   const out: ShareConfigPatch = {};
   if (
@@ -128,7 +144,17 @@ export async function updateConfig(
     raw["share"] = { ...(asRecord(raw["share"]) ?? {}), ...out };
   }
   await mkdir(dir, { recursive: true });
-  await writeFile(file, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+  const temporaryFile = path.join(dir, `.config.json.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporaryFile, `${JSON.stringify(raw, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    await rename(temporaryFile, file);
+  } finally {
+    await rm(temporaryFile, { force: true }).catch(() => undefined);
+  }
   const share = asRecord(raw["share"]) ?? {};
   const merged: AirgapConfig = {
     share: {

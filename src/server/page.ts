@@ -463,18 +463,27 @@ $("tools").onchange = async () => {
   if (!res.ok) setStatus(res.message || msg("share.page.toolSaveFailed"), true);
 };
 $("language").onchange = async () => {
-  const r = await fetch("/api/config", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ language: $("language").value }),
-  });
-  const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.languageSaveFailed") }));
-  if (!res.ok) {
-    $("language").value = LANGUAGE_PREFERENCE;
-    setStatus(res.message || msg("share.page.languageSaveFailed"), true);
-    return;
+  const select = $("language");
+  select.disabled = true;
+  try {
+    const r = await fetch("/api/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ language: $("language").value }),
+    });
+    const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.languageSaveFailed") }));
+    if (!res.ok) {
+      select.value = LANGUAGE_PREFERENCE;
+      setStatus(res.message || msg("share.page.languageSaveFailed"), true);
+      return;
+    }
+    window.location.reload();
+  } catch {
+    select.value = LANGUAGE_PREFERENCE;
+    setStatus(msg("share.page.languageSaveFailed"), true);
+  } finally {
+    select.disabled = false;
   }
-  window.location.reload();
 };
 $("done").onclick = async () => { await fetch("/api/close", { method: "POST" }); setStatus(msg("share.page.closed")); };
 

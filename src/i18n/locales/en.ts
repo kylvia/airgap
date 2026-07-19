@@ -106,6 +106,7 @@ export const en = {
   "share.api.configInteger": "sessionListLimit must be an integer",
   "share.api.configToolDisplay": "toolDisplay accepts only {values}",
   "share.api.configLanguage": "language accepts only {values}",
+  "share.api.configBody": "Config request body must be an object",
   "share.api.configEmpty": "No supported setting was provided",
   "share.api.configSaveFailed": "Could not save settings. Check ~/.airgap/config.json.",
   "share.api.sessionNotFound": "Session not found",
