@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import type { RuleMatch, SessionInfo, ToolDisplay, Turn } from "../types.js";
 import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "../types.js";
-import { loadConfig, sessionListLimit, shareToolDisplay, updateShareConfig } from "../config.js";
+import { loadConfig, sessionListLimit, shareToolDisplay, updateConfig, type ConfigPatch } from "../config.js";
 import { discoverSessions } from "../discovery.js";
 import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
@@ -15,7 +15,15 @@ import { renderMarkdown } from "../render/markdown.js";
 import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
 import { oneLine, peekTitle, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../session.js";
 import { renderPage } from "./page.js";
-import { createI18n, type Locale } from "../i18n/index.js";
+import {
+  LANGUAGE_PREFERENCES,
+  createI18n,
+  resolveLocale,
+  type I18n,
+  type LanguagePreference,
+  type Locale,
+} from "../i18n/index.js";
+import { detectSystemLocale, type SystemLocaleResult } from "../i18n/system.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
 
@@ -323,11 +331,22 @@ export interface ShareServer {
   close(): void;
 }
 
-export async function startShareServer(opts: { port?: number; defaultSession?: string; locale?: Locale }): Promise<ShareServer> {
-  const locale = opts.locale ?? "zh-CN";
-  const i18n = createI18n(locale);
+export interface ShareServerOptions {
+  port?: number;
+  defaultSession?: string;
+  locale?: Locale;
+  languagePreference?: LanguagePreference;
+  configHome?: string;
+  systemLocaleDetector?: () => Promise<SystemLocaleResult>;
+}
+
+export async function startShareServer(opts: ShareServerOptions): Promise<ShareServer> {
+  let locale = opts.locale ?? "zh-CN";
+  let i18n = createI18n(locale);
+  let languagePreference = opts.languagePreference ?? locale;
+  const systemLocaleDetector = opts.systemLocaleDetector ?? detectSystemLocale;
   // 启动时读 config；页面设置面板经 POST /api/config 持久化并即时更新这里
-  const bootCfg = await loadConfig();
+  const bootCfg = await loadConfig(opts.configHome);
   let listLimit = sessionListLimit(bootCfg);
   let toolDisplay = shareToolDisplay(bootCfg);
   let idleTimer: NodeJS.Timeout;
@@ -343,18 +362,27 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
 
   const server: Server = createServer((req, res) => {
     touch();
-    void handle(req, res).catch((err: unknown) => {
+    const requestLocale = locale;
+    const requestI18n = i18n;
+    const requestLanguagePreference = languagePreference;
+    void handle(req, res, requestLocale, requestI18n, requestLanguagePreference).catch((err: unknown) => {
       console.error(err instanceof Error ? err.message : String(err));
-      sendJson(res, 500, { ok: false, code: "INTERNAL_ERROR", message: i18n.t("share.api.internal") });
+      sendJson(res, 500, { ok: false, code: "INTERNAL_ERROR", message: requestI18n.t("share.api.internal") });
     });
   });
 
-  async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async function handle(
+    req: IncomingMessage,
+    res: ServerResponse,
+    requestLocale: Locale,
+    requestI18n: I18n,
+    requestLanguagePreference: LanguagePreference,
+  ): Promise<void> {
     const url = new URL(req.url ?? "/", "http://localhost");
     const p = url.pathname;
 
     if (req.method === "GET" && p === "/") {
-      const html = renderPage(opts.defaultSession, toolDisplay, isMac, locale);
+      const html = renderPage(opts.defaultSession, toolDisplay, isMac, requestLocale, requestLanguagePreference);
       const buf = Buffer.from(html, "utf8");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-length": buf.length });
       res.end(buf);
@@ -367,49 +395,84 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
       return;
     }
     if (req.method === "POST" && p === "/api/config") {
-      const body = JSON.parse(await readBody(req, locale)) as { sessionListLimit?: unknown; toolDisplay?: unknown };
-      const patch: { sessionListLimit?: number; toolDisplay?: ToolDisplay } = {};
+      const body = JSON.parse(await readBody(req, requestLocale)) as {
+        language?: unknown;
+        sessionListLimit?: unknown;
+        toolDisplay?: unknown;
+      };
+      const patch: ConfigPatch = {};
+      if (body.language !== undefined) {
+        if (
+          typeof body.language !== "string" ||
+          !(LANGUAGE_PREFERENCES as readonly string[]).includes(body.language)
+        ) {
+          sendJson(res, 400, {
+            ok: false,
+            code: "INVALID_LANGUAGE",
+            message: requestI18n.t("share.api.configLanguage", { values: LANGUAGE_PREFERENCES.join(" | ") }),
+          });
+          return;
+        }
+        patch.language = body.language as LanguagePreference;
+      }
       if (body.sessionListLimit !== undefined) {
         if (typeof body.sessionListLimit !== "number" || !Number.isInteger(body.sessionListLimit)) {
-          sendJson(res, 400, { ok: false, code: "INVALID_SESSION_LIST_LIMIT", message: i18n.t("share.api.configInteger") });
+          sendJson(res, 400, { ok: false, code: "INVALID_SESSION_LIST_LIMIT", message: requestI18n.t("share.api.configInteger") });
           return;
         }
         patch.sessionListLimit = body.sessionListLimit;
       }
       if (body.toolDisplay !== undefined) {
         if (typeof body.toolDisplay !== "string" || !(TOOL_DISPLAYS as readonly string[]).includes(body.toolDisplay)) {
-          sendJson(res, 400, { ok: false, code: "INVALID_TOOL_DISPLAY", message: i18n.t("share.api.configToolDisplay", { values: TOOL_DISPLAYS.join(" | ") }) });
+          sendJson(res, 400, { ok: false, code: "INVALID_TOOL_DISPLAY", message: requestI18n.t("share.api.configToolDisplay", { values: TOOL_DISPLAYS.join(" | ") }) });
           return;
         }
         patch.toolDisplay = body.toolDisplay as ToolDisplay;
       }
-      if (patch.sessionListLimit === undefined && patch.toolDisplay === undefined) {
-        sendJson(res, 400, { ok: false, code: "EMPTY_CONFIG_PATCH", message: i18n.t("share.api.configEmpty") });
+      if (patch.language === undefined && patch.sessionListLimit === undefined && patch.toolDisplay === undefined) {
+        sendJson(res, 400, { ok: false, code: "EMPTY_CONFIG_PATCH", message: requestI18n.t("share.api.configEmpty") });
         return;
       }
       try {
-        const saved = await updateShareConfig(patch);
+        let nextLocale: Locale | undefined;
+        if (patch.language === "auto") {
+          nextLocale = resolveLocale({ system: (await systemLocaleDetector()).locale });
+        } else if (patch.language !== undefined) {
+          nextLocale = patch.language;
+        }
+        const saved = await updateConfig(patch, opts.configHome);
         listLimit = saved.sessionListLimit;
         toolDisplay = saved.toolDisplay;
-        sendJson(res, 200, { ok: true, limit: listLimit, toolDisplay });
+        if (nextLocale !== undefined) {
+          languagePreference = saved.language;
+          locale = nextLocale;
+          i18n = createI18n(locale);
+        }
+        sendJson(res, 200, {
+          ok: true,
+          limit: listLimit,
+          toolDisplay,
+          language: languagePreference,
+          locale,
+        });
       } catch (err) {
-        sendJson(res, 500, { ok: false, code: "CONFIG_SAVE_FAILED", message: i18n.t("share.api.configSaveFailed") });
+        sendJson(res, 500, { ok: false, code: "CONFIG_SAVE_FAILED", message: requestI18n.t("share.api.configSaveFailed") });
       }
       return;
     }
     if (req.method === "GET" && p.startsWith("/api/session/")) {
       const id = decodeURIComponent(p.slice("/api/session/".length));
-      const detail = await loadDetail(id, parseToolDisplay(url.searchParams.get("tools")), locale);
+      const detail = await loadDetail(id, parseToolDisplay(url.searchParams.get("tools")), requestLocale);
       if (!detail) {
-        sendJson(res, 404, { code: "SESSION_NOT_FOUND", message: i18n.t("share.api.sessionNotFound") });
+        sendJson(res, 404, { code: "SESSION_NOT_FOUND", message: requestI18n.t("share.api.sessionNotFound") });
         return;
       }
       sendJson(res, 200, detail);
       return;
     }
     if (req.method === "POST" && p === "/api/export") {
-      const body = JSON.parse(await readBody(req, locale)) as ExportBody;
-      const result = await handleExport(body, locale);
+      const body = JSON.parse(await readBody(req, requestLocale)) as ExportBody;
+      const result = await handleExport(body, requestLocale);
       if (result.ok && result.bytes) {
         res.writeHead(200, {
           "content-type": "image/png",
@@ -431,7 +494,7 @@ export async function startShareServer(opts: { port?: number; defaultSession?: s
       }, 100);
       return;
     }
-    sendJson(res, 404, { code: "NOT_FOUND", message: i18n.t("share.api.notFound") });
+    sendJson(res, 404, { code: "NOT_FOUND", message: requestI18n.t("share.api.notFound") });
   }
 
   const port = await listen(server, opts.port);

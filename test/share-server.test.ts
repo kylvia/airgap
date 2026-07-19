@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type { RuleMatch, Turn } from "../src/types.js";
 import { exportBlockReason, startShareServer } from "../src/server/share-server.js";
 import { renderPage, serializeForScript } from "../src/server/page.js";
@@ -7,6 +10,22 @@ const scan = (s: string): RuleMatch[] =>
   s.includes("sk-ant-LEAK")
     ? [{ ruleId: "anthropic-key", severity: "critical", secret: "sk-ant-LEAK", preview: "sk-a…LEAK" }]
     : [];
+
+const tempHomes: string[] = [];
+
+async function tempHome(config?: string): Promise<string> {
+  const home = await mkdtemp(path.join(os.tmpdir(), "airgap-share-language-"));
+  tempHomes.push(home);
+  if (config !== undefined) {
+    await mkdir(path.join(home, ".airgap"), { recursive: true });
+    await writeFile(path.join(home, ".airgap", "config.json"), config, "utf8");
+  }
+  return home;
+}
+
+afterEach(async () => {
+  await Promise.all(tempHomes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
+});
 
 /** A tool turn whose only secret (if any) sits in the requested slot; summary/user text stay clean. */
 function toolTurn(secretIn: "input" | "result" | "none"): Turn {
@@ -121,6 +140,101 @@ describe("Share server locale wiring", () => {
       const response = await fetch(new URL("/missing", server.url));
       expect(response.status).toBe(404);
       await expect(response.json()).resolves.toEqual({ code: "NOT_FOUND", message: "Not found" });
+    } finally {
+      server.close();
+    }
+  });
+
+  it("persists explicit language, switches live responses, then follows the injected system locale", async () => {
+    const home = await tempHome();
+    let detectorCalls = 0;
+    const server = await startShareServer({
+      locale: "en",
+      languagePreference: "en",
+      configHome: home,
+      systemLocaleDetector: async () => {
+        detectorCalls += 1;
+        return { locale: "en-US", source: "test system" };
+      },
+    });
+    try {
+      const explicit = await fetch(new URL("/api/config", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ language: "zh-CN" }),
+      });
+      expect(explicit.status).toBe(200);
+      await expect(explicit.json()).resolves.toMatchObject({
+        ok: true,
+        language: "zh-CN",
+        locale: "zh-CN",
+      });
+      expect(await readFile(path.join(home, ".airgap", "config.json"), "utf8")).toContain(
+        '"language": "zh-CN"',
+      );
+      const chinesePage = await fetch(server.url).then((response) => response.text());
+      expect(chinesePage).toContain('<html lang="zh-CN">');
+      expect(chinesePage).toContain('<option value="zh-CN" selected>简体中文</option>');
+      await expect(fetch(new URL("/missing", server.url)).then((response) => response.json())).resolves.toEqual({
+        code: "NOT_FOUND",
+        message: "未找到",
+      });
+
+      const automatic = await fetch(new URL("/api/config", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ language: "auto" }),
+      });
+      await expect(automatic.json()).resolves.toMatchObject({
+        ok: true,
+        language: "auto",
+        locale: "en",
+      });
+      expect(detectorCalls).toBe(1);
+      const persisted = JSON.parse(
+        await readFile(path.join(home, ".airgap", "config.json"), "utf8"),
+      ) as Record<string, unknown>;
+      expect(persisted).not.toHaveProperty("language");
+      const englishPage = await fetch(server.url).then((response) => response.text());
+      expect(englishPage).toContain('<html lang="en">');
+      expect(englishPage).toContain('<option value="auto" selected>Follow system</option>');
+    } finally {
+      server.close();
+    }
+  });
+
+  it("rejects unsupported language values without changing the live locale", async () => {
+    const server = await startShareServer({ locale: "en", configHome: await tempHome() });
+    try {
+      const response = await fetch(new URL("/api/config", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ language: "fr" }),
+      });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ code: "INVALID_LANGUAGE" });
+      expect(await fetch(server.url).then((result) => result.text())).toContain('<html lang="en">');
+    } finally {
+      server.close();
+    }
+  });
+
+  it("keeps the live locale unchanged when language persistence fails", async () => {
+    const home = await tempHome("{ broken");
+    const server = await startShareServer({ locale: "en", languagePreference: "en", configHome: home });
+    try {
+      const response = await fetch(new URL("/api/config", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ language: "zh-CN" }),
+      });
+      expect(response.status).toBe(500);
+      expect(await readFile(path.join(home, ".airgap", "config.json"), "utf8")).toBe("{ broken");
+      expect(await fetch(server.url).then((result) => result.text())).toContain('<html lang="en">');
+      await expect(fetch(new URL("/missing", server.url)).then((result) => result.json())).resolves.toEqual({
+        code: "NOT_FOUND",
+        message: "Not found",
+      });
     } finally {
       server.close();
     }
