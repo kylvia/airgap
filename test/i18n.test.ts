@@ -104,5 +104,8 @@ describe("createI18n", () => {
     expect(en.t("share.turnCount", { count: 3 })).toBe("3 turns");
     expect(zh.t("share.turnCount", { count: 3 })).toBe("共 3 轮");
     expect(en.t("share.turnCount", { count: 1 })).toBe("1 turn");
+    expect(
+      zh.t("update.available", { latest: "0.3.0", current: "0.2.0" }),
+    ).toContain("Airgap 0.3.0 已发布（当前 0.2.0）");
   });
 });

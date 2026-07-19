@@ -113,4 +113,5 @@ export const en = {
   "share.api.notFound": "Not found",
   "share.api.bodyTooLarge": "Request body is too large",
   "share.api.internal": "The request failed. Check the airgap terminal for details.",
+  "update.available": "Airgap {latest} is available (current {current})\nUpdate global install: npm install -g airgap@latest\nnpx users: npx airgap@latest\nDisable checks: AIRGAP_NO_UPDATE_CHECK=1",
 };

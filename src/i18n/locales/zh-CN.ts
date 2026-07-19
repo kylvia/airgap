@@ -115,4 +115,5 @@ export const zhCN = {
   "share.api.notFound": "未找到",
   "share.api.bodyTooLarge": "请求体过大",
   "share.api.internal": "请求失败，请在 airgap 终端中查看详情。",
+  "update.available": "Airgap {latest} 已发布（当前 {current}）\n升级全局安装：npm install -g airgap@latest\nnpx 用户：npx airgap@latest\n关闭检查：AIRGAP_NO_UPDATE_CHECK=1",
 } satisfies Record<keyof typeof en, string>;
