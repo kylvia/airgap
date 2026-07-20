@@ -222,6 +222,55 @@ describe("renderPage desktop surface", () => {
     expect(page).toContain('await loadSession($("sess").value)');
   });
 
+  it("maps desktop export feedback without exposing backend implementation details", () => {
+    expect(page).toContain("function desktopExportMessage(action, format, ok)");
+    expect(page).toContain('action === "clipboard" && format === "md"');
+    expect(page).toContain('msg(ok ? "share.desktop.copyTextSuccess" : "share.desktop.copyTextFailed")');
+    expect(page).toContain('msg(ok ? "share.desktop.copyImageSuccess" : "share.desktop.copyImageFailed")');
+    expect(page).toContain('msg(ok ? "share.desktop.saveImageSuccess" : "share.desktop.saveImageFailed")');
+    const exportHandler = page.slice(page.indexOf("async function doExport"), page.indexOf("for (const btn"));
+    expect(exportHandler).toContain("confirm(res.message");
+    expect(exportHandler).toContain("desktopExportMessage(action, format, res.ok) || res.message");
+    expect(exportHandler).toContain("desktopExportMessage(action, format, false)");
+  });
+
+  it("uses generic desktop settings failures instead of server paths", () => {
+    expect(page).toContain('function desktopSettingsError() { return msg("share.desktop.settingsSaveFailed"); }');
+    expect(page).toContain('SURFACE === "desktop" ? desktopSettingsError() : res.message');
+  });
+
+  it("labels desktop controls and preserves the browser selection controls", () => {
+    expect(page).toMatch(/<select id="sess"[^>]*aria-label="Conversation"[^>]*disabled/);
+    expect(page).toMatch(/<select id="language"[^>]*aria-label="Language"/);
+    expect(page).toMatch(/<select id="limit"[^>]*aria-label="Conversation list size"/);
+    expect(page).toMatch(/<select id="tools"[^>]*aria-label="Tool display"/);
+    expect(page).toContain('<iframe id="preview" data-testid="preview" title="Conversation preview"></iframe>');
+    expect(page).toContain('<button type="button" id="all">Select all</button>');
+    expect(page).toContain('<button type="button" id="none">Clear</button>');
+
+    const browser = renderPage(undefined, "summary", true, "en", "en", "browser");
+    expect(browser).toContain('<a id="all">Select all</a><a id="none">Clear</a>');
+  });
+
+  it("announces status, focuses surfaced errors, and exposes settings state", () => {
+    expect(page).toContain('id="status" role="status" aria-live="polite"');
+    expect(page).toContain('id="empty-state" data-testid="empty-state" tabindex="-1"');
+    expect(page).toContain("state.focus()");
+    expect(page).toContain('aria-expanded="false" aria-controls="prefpanel"');
+    expect(page).toContain("function setPreferencesOpen(open, restoreFocus)");
+    expect(page).toContain('button.setAttribute("aria-expanded", String(open))');
+    expect(page).toContain("if (restoreFocus) button.focus()");
+    expect(page).toContain('if (e.key === "Escape") setPreferencesOpen(false, true)');
+  });
+
+  it("starts desktop picker and export actions disabled and restores them from shared state", () => {
+    expect(page).toMatch(/<button[^>]*data-testid="copy-text"[^>]*disabled/);
+    expect(page).toMatch(/<button[^>]*data-testid="save-image"[^>]*disabled/);
+    expect(page).toMatch(/<button[^>]*data-testid="copy-image"[^>]*disabled/);
+    expect(page).toContain("picker.disabled = busy || picker.options.length === 0");
+    expect(page).toContain("button.disabled = busy || !detail");
+  });
+
   it("leaves the default browser renderer byte-identical to explicit browser mode", () => {
     expect(renderPage()).toBe(renderPage(undefined, "summary", true, "zh-CN", "zh-CN", "browser", "9.9.9"));
     expect(renderPage()).toContain('id="done"');

@@ -136,6 +136,17 @@ describe("createI18n", () => {
       "share.desktop.about",
       "share.desktop.version",
       "share.desktop.downloadPage",
+      "share.desktop.conversationPicker",
+      "share.desktop.sessionListLabel",
+      "share.desktop.toolDisplayLabel",
+      "share.desktop.previewLabel",
+      "share.desktop.copyTextSuccess",
+      "share.desktop.copyTextFailed",
+      "share.desktop.copyImageSuccess",
+      "share.desktop.copyImageFailed",
+      "share.desktop.saveImageSuccess",
+      "share.desktop.saveImageFailed",
+      "share.desktop.settingsSaveFailed",
     ] as const;
 
     for (const key of keys) {

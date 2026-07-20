@@ -96,6 +96,9 @@ export function renderPage(
   body[data-surface="desktop"] .empty-card button { margin-top: 18px; height: 36px; padding: 0 18px; border: 1px solid var(--btn-primary-bg); border-radius: var(--radius-button); background: var(--btn-primary-bg); color: var(--btn-primary-fg); font: 500 13px var(--font-sans); cursor: pointer; }
   body[data-surface="desktop"] .empty-card a { display: inline-block; margin: 12px 0 0 12px; color: var(--fg); font-size: 13px; text-underline-offset: 3px; }
   body[data-surface="desktop"] .row .roles { display: block; color: var(--fg-subtle); font-size: 11px; margin-bottom: 3px; }
+  body[data-surface="desktop"] .left .bar button { border: 0; border-radius: var(--radius-input); background: transparent; color: var(--fg); cursor: pointer; font: inherit; text-decoration: underline; text-underline-offset: 3px; }
+  body[data-surface="desktop"] .left .bar button:hover { opacity: 0.68; }
+  body[data-surface="desktop"] .left .bar button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   body[data-surface="desktop"] footer .rdct-copy { display: flex; flex-direction: column; gap: 2px; }
   body[data-surface="desktop"] footer .rdct-copy small { color: var(--fg-subtle); font-size: 11px; }
   body[data-surface="desktop"] footer .status { min-width: 180px; }` : "";
@@ -106,14 +109,14 @@ export function renderPage(
   const settingsMarkup = isDesktop
     ? `<div id="prefpanel" hidden>
       <h2>${escapeHtml(t("share.desktop.settings"))}</h2>
-      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>
+      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language" aria-label="${escapeHtml(t("share.page.language"))}">${languageOptions}</select></div>
       <details><summary>${escapeHtml(t("share.desktop.advanced"))}</summary>
-        <div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit">
+        <div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit" aria-label="${escapeHtml(t("share.desktop.sessionListLabel"))}">
           <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
           <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
           <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
         </select></div>
-        <div class="prow"><span>${escapeHtml(t("share.page.toolDisplay"))}</span><select id="tools">${toolsOptions}</select></div>
+        <div class="prow"><span>${escapeHtml(t("share.page.toolDisplay"))}</span><select id="tools" aria-label="${escapeHtml(t("share.desktop.toolDisplayLabel"))}">${toolsOptions}</select></div>
       </details>
       <section class="about" aria-label="${escapeHtml(t("share.desktop.about"))}">
         <h2>${escapeHtml(t("share.desktop.about"))}</h2>
@@ -132,7 +135,7 @@ export function renderPage(
       <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>
     </div>`;
   const emptyStateMarkup = isDesktop
-    ? `<section class="empty-state" id="empty-state" data-testid="empty-state" hidden>
+    ? `<section class="empty-state" id="empty-state" data-testid="empty-state" tabindex="-1" aria-labelledby="empty-title" hidden>
       <div class="empty-card">
         <h2 id="empty-title">${escapeHtml(t("share.desktop.emptyTitle"))}</h2>
         <p id="empty-body">${escapeHtml(t("share.desktop.emptyBody"))}</p>
@@ -145,11 +148,11 @@ export function renderPage(
   const footerMarkup = isDesktop
     ? `<footer>
     <label class="rdct" title="${escapeHtml(t("share.desktop.redactionHint"))}"><input type="checkbox" id="redact" data-testid="redaction-toggle" checked><span class="rdct-copy"><span>${escapeHtml(t("share.desktop.redaction"))}</span><small>${escapeHtml(t("share.desktop.redactionHint"))}</small></span></label>
-    <button data-a="clipboard" data-f="md" data-testid="copy-text">${escapeHtml(t("share.desktop.copyText"))}</button>
-    <button data-a="save" data-f="png" data-testid="save-image">${escapeHtml(t("share.desktop.saveImage"))}</button>
+    <button data-a="clipboard" data-f="md" data-testid="copy-text" disabled>${escapeHtml(t("share.desktop.copyText"))}</button>
+    <button data-a="save" data-f="png" data-testid="save-image" disabled>${escapeHtml(t("share.desktop.saveImage"))}</button>
     <span class="status err" id="image-failure-copy" hidden>${escapeHtml(t("share.desktop.imageFailed"))}</span>
-    <span class="status" id="status">${escapeHtml(t("share.desktop.ready"))}</span>
-    <button class="primary" data-a="clipboard" data-f="png" data-testid="copy-image">${escapeHtml(t("share.desktop.copyImage"))}</button>
+    <span class="status" id="status" role="status" aria-live="polite">${escapeHtml(t("share.desktop.ready"))}</span>
+    <button class="primary" data-a="clipboard" data-f="png" data-testid="copy-image" disabled>${escapeHtml(t("share.desktop.copyImage"))}</button>
   </footer>`
     : `<footer>
     <label class="rdct" title="${escapeHtml(t("share.page.redactHint"))}"><input type="checkbox" id="redact" checked>${escapeHtml(t("share.page.redact"))}</label>
@@ -178,6 +181,9 @@ export function renderPage(
   const listConfigComment = isDesktop
     ? "// Change the conversation limit in the shared Airgap settings."
     : "// 页面上改条数 = 写回 ~/.airgap/config.json（与配置文件同一真源），成功后按新条数重拉列表。";
+  const selectionControlsMarkup = isDesktop
+    ? `<button type="button" id="all">${escapeHtml(t("share.page.selectAll"))}</button><button type="button" id="none">${escapeHtml(t("share.page.clear"))}</button>`
+    : `<a id="all">${escapeHtml(t("share.page.selectAll"))}</a><a id="none">${escapeHtml(t("share.page.clear"))}</a>`;
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head>
@@ -278,10 +284,10 @@ ${desktopCss}
   <header>
     <span class="logo">${airgapMark(20)}<span>airgap</span></span>
     <span style="font-size:13px;color:var(--fg-muted)">${escapeHtml(t(isDesktop ? "share.desktop.title" : "share.page.subtitle"))}</span>
-    <select id="sess"${testId("conversation-picker")}></select>
+    <select id="sess"${testId("conversation-picker")}${isDesktop ? ` aria-label="${escapeHtml(t("share.desktop.conversationPicker"))}" disabled` : ""}></select>
     <button id="refresh"${testId("refresh")} title="${escapeHtml(t(isDesktop ? "share.desktop.recheck" : "share.page.refresh"))}" aria-label="${escapeHtml(t(isDesktop ? "share.desktop.recheck" : "share.page.refresh"))}">${refreshMark}</button>
     ${sidMarkup}
-    <button id="prefs"${testId("settings")} title="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settings"))}" aria-label="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settingsAria"))}">${prefsMark}</button>
+    <button id="prefs"${testId("settings")}${isDesktop ? ' aria-expanded="false" aria-controls="prefpanel"' : ""} title="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settings"))}" aria-label="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settingsAria"))}">${prefsMark}</button>
     ${settingsMarkup}
   </header>
   <div class="sbanner" id="sbanner"></div>
@@ -290,12 +296,12 @@ ${desktopCss}
     ${emptyStateMarkup}
     <div class="left">
       <div class="bar">
-        <a id="all">${escapeHtml(t("share.page.selectAll"))}</a><a id="none">${escapeHtml(t("share.page.clear"))}</a>
+        ${selectionControlsMarkup}
         <span id="count" style="margin-left:auto"></span>
       </div>
       <div class="list" id="list"${testId("turn-list")}></div>
     </div>
-    <div class="right"><iframe id="preview"${testId("preview")}></iframe></div>
+    <div class="right"><iframe id="preview"${testId("preview")}${isDesktop ? ` title="${escapeHtml(t("share.desktop.previewLabel"))}"` : ""}></iframe></div>
   </main>
   ${footerMarkup}
 <script>
@@ -327,6 +333,16 @@ function setInteractionBusy(busy) {
     button.disabled = busy || !detail;
   }
 }
+
+function desktopExportMessage(action, format, ok) {
+  if (SURFACE !== "desktop") return null;
+  if (action === "clipboard" && format === "md") return msg(ok ? "share.desktop.copyTextSuccess" : "share.desktop.copyTextFailed");
+  if (action === "clipboard" && format === "png") return msg(ok ? "share.desktop.copyImageSuccess" : "share.desktop.copyImageFailed");
+  if (action === "save" && format === "png") return msg(ok ? "share.desktop.saveImageSuccess" : "share.desktop.saveImageFailed");
+  return ok ? msg("share.desktop.ready") : msg("share.desktop.imageFailed");
+}
+
+function desktopSettingsError() { return msg("share.desktop.settingsSaveFailed"); }
 
 function providerName(source) { return source === "claude" ? "Claude Code" : "Codex"; }
 
@@ -400,6 +416,7 @@ function showDiscoveryState(sessions, issues) {
       title.textContent = issue.provider || providerName(issue.source);
       body.textContent = message;
       help.hidden = false;
+      state.focus();
     }
     return;
   }
@@ -407,6 +424,7 @@ function showDiscoveryState(sessions, issues) {
   title.textContent = msg("share.desktop.emptyTitle");
   body.textContent = msg("share.desktop.emptyBody");
   state.hidden = sessions.length > 0;
+  if (!state.hidden) state.focus();
 }
 
 function showStartupError() {
@@ -416,6 +434,7 @@ function showStartupError() {
   $("empty-title").textContent = msg("share.desktop.startupError");
   $("empty-body").textContent = msg("share.desktop.localOnly");
   $("permission-help").hidden = true;
+  state.focus();
 }
 
 // ai-title 会随会话演进被 Claude 持续更新——窗口重获焦点时（从 Claude Code 切回来的瞬间）
@@ -473,7 +492,10 @@ $("limit").onchange = async () => {
   const n = Number($("limit").value);
   const r = await fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionListLimit: n }) });
   const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.saveFailed") }));
-  if (!res.ok) { setStatus(res.message || msg("share.page.saveFailed"), true); return; }
+  if (!res.ok) {
+    setStatus(SURFACE === "desktop" ? desktopSettingsError() : res.message || msg("share.page.saveFailed"), true);
+    return;
+  }
   setStatus(SURFACE === "desktop"
     ? msg("share.page.listRefreshed")
     : msg("share.page.listSaved", { count: res.limit }));
@@ -619,20 +641,26 @@ async function doExport(action, format, acceptRisk) {
   const turns = [...selected].sort((a, b) => a - b);
   setStatus(redact ? msg("share.page.redacting") : msg("share.page.processing"));
   const body = JSON.stringify({ sessionId: detail.id, turns, format, action, redact, acceptRisk: accept, tools: $("tools").value });
-  const r = await fetch("/api/export", { method: "POST", headers: { "content-type": "application/json" }, body });
-  if (action === "download" && r.ok && r.headers.get("content-type") === "image/png") {
-    const blob = await r.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "airgap-share.png";
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    setStatus(redact ? msg("share.page.downloadedRedacted") : msg("share.page.downloaded")); return;
+  try {
+    const r = await fetch("/api/export", { method: "POST", headers: { "content-type": "application/json" }, body });
+    if (action === "download" && r.ok && r.headers.get("content-type") === "image/png") {
+      const blob = await r.blob(); const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "airgap-share.png";
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      setStatus(redact ? msg("share.page.downloadedRedacted") : msg("share.page.downloaded")); return;
+    }
+    const res = await r.json();
+    // 服务端拦截（原样导出且命中，或有人绕过 UI）：确认后带 acceptRisk 重试一次。
+    if (r.status === 409 && res.blocked) {
+      if (confirm(res.message + "\\n" + msg("share.page.confirmAgain"))) return doExport(action, format, true);
+      setStatus(msg("share.page.cancelled"), true); return;
+    }
+    setStatus(desktopExportMessage(action, format, res.ok) || res.message, !res.ok);
+  } catch (error) {
+    const message = desktopExportMessage(action, format, false);
+    if (message) setStatus(message, true);
+    else throw error;
   }
-  const res = await r.json();
-  // 服务端拦截（原样导出且命中，或有人绕过 UI）：确认后带 acceptRisk 重试一次。
-  if (r.status === 409 && res.blocked) {
-    if (confirm(res.message + "\\n" + msg("share.page.confirmAgain"))) return doExport(action, format, true);
-    setStatus(msg("share.page.cancelled"), true); return;
-  }
-  setStatus(res.message, !res.ok);
 }
 
 for (const btn of document.querySelectorAll("footer button[data-a]")) {
@@ -641,9 +669,16 @@ for (const btn of document.querySelectorAll("footer button[data-a]")) {
 $("all").onclick = () => { for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
 $("none").onclick = () => { selected.clear(); renderList(); updateCount(); syncPreview(null); };
 // 设置面板开关：点按钮 toggle；点面板外或按 Esc 关闭（面板内点击冒泡到 document 时被 contains 放行）。
-$("prefs").onclick = (e) => { e.stopPropagation(); const p = $("prefpanel"); p.hidden = !p.hidden; };
-document.addEventListener("click", (e) => { const p = $("prefpanel"); if (!p.hidden && !p.contains(e.target)) p.hidden = true; });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("prefpanel").hidden = true; });
+function setPreferencesOpen(open, restoreFocus) {
+  const panel = $("prefpanel");
+  const button = $("prefs");
+  panel.hidden = !open;
+  if (SURFACE === "desktop") button.setAttribute("aria-expanded", String(open));
+  if (restoreFocus) button.focus();
+}
+$("prefs").onclick = (e) => { e.stopPropagation(); setPreferencesOpen($("prefpanel").hidden, false); };
+document.addEventListener("click", (e) => { const p = $("prefpanel"); if (!p.hidden && !p.contains(e.target)) setPreferencesOpen(false, false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") setPreferencesOpen(false, true); });
 // 切换工具展示级别：服务端按新级别重渲各轮片段（预览=导出，物理裁剪而非 CSS 隐藏），保留已勾选轮次；
 // 同时静默持久化到 config.json——先等预览刷新（用户在等它），保存失败的提示最后落地不被刷新提示覆盖。
 $("tools").onchange = async () => {
@@ -651,7 +686,7 @@ $("tools").onchange = async () => {
     .then((r) => r.json()).catch(() => ({ ok: false, message: msg("share.page.toolSaveFailed") }));
   if (detail) await loadSession(detail.id, true);
   const res = await save;
-  if (!res.ok) setStatus(res.message || msg("share.page.toolSaveFailed"), true);
+  if (!res.ok) setStatus(SURFACE === "desktop" ? desktopSettingsError() : res.message || msg("share.page.toolSaveFailed"), true);
 };
 $("language").onchange = async () => {
   const select = $("language");
@@ -665,13 +700,13 @@ $("language").onchange = async () => {
     const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.languageSaveFailed") }));
     if (!res.ok) {
       select.value = LANGUAGE_PREFERENCE;
-      setStatus(res.message || msg("share.page.languageSaveFailed"), true);
+      setStatus(SURFACE === "desktop" ? desktopSettingsError() : res.message || msg("share.page.languageSaveFailed"), true);
       return;
     }
     window.location.reload();
   } catch {
     select.value = LANGUAGE_PREFERENCE;
-    setStatus(msg("share.page.languageSaveFailed"), true);
+    setStatus(SURFACE === "desktop" ? desktopSettingsError() : msg("share.page.languageSaveFailed"), true);
   } finally {
     select.disabled = false;
   }
