@@ -320,6 +320,14 @@ let pvReady = false;          // 预览 iframe 是否已加载好
 const $ = (id) => document.getElementById(id);
 function setStatus(msg, err) { const s = $("status"); s.textContent = msg; s.className = "status" + (err ? " err" : ""); }
 
+function setInteractionBusy(busy) {
+  const picker = $("sess");
+  picker.disabled = busy || picker.options.length === 0;
+  for (const button of document.querySelectorAll("footer button[data-a]")) {
+    button.disabled = busy || !detail;
+  }
+}
+
 function providerName(source) { return source === "claude" ? "Claude Code" : "Codex"; }
 
 function fillOptions(sessions, keep) {
@@ -348,6 +356,7 @@ function syncLimitSelect(limit) {
 }
 
 async function loadSessions() {
+  setInteractionBusy(true);
   try {
     const r = await fetch("/api/sessions");
     if (!r.ok) throw new Error("sessions request failed");
@@ -362,7 +371,16 @@ async function loadSessions() {
   } catch (error) {
     if (SURFACE === "desktop") showStartupError();
     else throw error;
+  } finally {
+    if (!detail) setInteractionBusy(false);
   }
+}
+
+function discoveryDiagnostic(issue) {
+  return msg("share.desktop.permissionError", {
+    provider: issue.provider || providerName(issue.source),
+    path: issue.path,
+  });
 }
 
 function showDiscoveryState(sessions, issues) {
@@ -373,7 +391,7 @@ function showDiscoveryState(sessions, issues) {
   const help = $("permission-help");
   const issue = issues[0];
   if (issue) {
-    const message = msg("share.desktop.permissionError", { provider: issue.provider || providerName(issue.source), path: issue.path });
+    const message = discoveryDiagnostic(issue);
     if (sessions.length > 0) {
       state.hidden = true;
       setStatus(message, true);
@@ -406,12 +424,16 @@ let lastListRefresh = 0;
 async function refreshSessions() {
   const q = detail ? "?ensure=" + encodeURIComponent(detail.id) : "";
   const r = await fetch("/api/sessions" + q);
-  if (!r.ok) return false;
+  if (!r.ok) return "failed";
   const data = await r.json();
+  if (SURFACE === "desktop" && detail && data.issues && data.issues.length > 0) {
+    setStatus(discoveryDiagnostic(data.issues[0]), true);
+    return "diagnostic";
+  }
   fillOptions(data.sessions, detail ? detail.id : null);
   syncLimitSelect(data.limit);
   showDiscoveryState(data.sessions, data.issues || []);
-  return true;
+  return "ok";
 }
 let manualRefreshInFlight = false;
 async function refreshCurrentSession() {
@@ -421,7 +443,9 @@ async function refreshCurrentSession() {
   button.disabled = true;
   button.setAttribute("aria-busy", "true");
   try {
-    if (!await refreshSessions()) {
+    const refreshResult = await refreshSessions();
+    if (refreshResult === "diagnostic") return;
+    if (refreshResult === "failed") {
       setStatus(msg("share.page.refreshListFailed"), true);
       return;
     }
@@ -473,10 +497,16 @@ function rel(ms) {
 function setLoading(on) { $("loading").classList.toggle("on", !!on); }
 
 async function loadSession(id, keepSelection, refreshedStatus) {
+  const previousId = detail ? detail.id : null;
+  setInteractionBusy(true);
   setStatus(msg("share.page.loading")); setLoading(true);
   try {
     const r = await fetch("/api/session/" + encodeURIComponent(id) + "?tools=" + encodeURIComponent($("tools").value));
-    if (!r.ok) { setStatus(msg("share.page.loadFailed"), true); return false; }
+    if (!r.ok) {
+      if (previousId) $("sess").value = previousId;
+      setStatus(msg("share.page.loadFailed"), true);
+      return false;
+    }
     detail = await r.json();
     if (!keepSelection) {
       selected.clear();
@@ -493,10 +523,12 @@ ${sidScript}
       : msg("share.page.loadedSummary", { turns: detail.turns.length, selected: selected.size }));
     return true;
   } catch {
+    if (previousId) $("sess").value = previousId;
     setStatus(msg(SURFACE === "desktop" ? "share.desktop.startupError" : "share.page.loadClosed"), true);
     return false;
   } finally {
     setLoading(false);
+    setInteractionBusy(false);
   }
 }
 

@@ -81,6 +81,8 @@ export const en = {
   "share.page.closed": "Closed. You can close this tab.",
   "share.desktop.title": "Share conversation",
   "share.desktop.conversationLabel": "{project} · {provider} · {time}",
+  "share.desktop.claudeConversation": "Claude Code conversation",
+  "share.desktop.codexConversation": "Codex conversation",
   "share.desktop.recheck": "Recheck",
   "share.desktop.role.me": "Me",
   "share.desktop.role.assistant": "AI assistant",

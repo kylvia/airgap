@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuleMatch, Turn } from "../src/types.js";
 import { createShareAccessToken, shareCookieName } from "../src/server/share-access.js";
-import { exportBlockReason, startShareServer } from "../src/server/share-server.js";
+import { desktopProjectLabel, exportBlockReason, startShareServer } from "../src/server/share-server.js";
 import { renderPage, serializeForScript } from "../src/server/page.js";
 
 const scan = (s: string): RuleMatch[] =>
@@ -189,12 +189,32 @@ describe("renderPage desktop surface", () => {
   });
 
   it("preserves the shared state machine and current selection across refresh/export failures", () => {
-    expect(page).toContain("if (!r.ok) return false");
+    expect(page).toContain('if (!r.ok) return "failed"');
     expect(page).toContain("const selected = new Set()");
     const refresh = page.slice(page.indexOf("async function refreshSessions"), page.indexOf("let manualRefreshInFlight"));
-    expect(refresh.indexOf("fillOptions")).toBeGreaterThan(refresh.indexOf("if (!r.ok) return false"));
+    expect(refresh.indexOf("fillOptions")).toBeGreaterThan(refresh.indexOf('if (!r.ok) return "failed"'));
     const exportHandler = page.slice(page.indexOf("async function doExport"), page.indexOf("for (const btn"));
     expect(exportHandler).not.toContain("selected.clear()");
+  });
+
+  it("rolls the picker back and keeps export disabled when a session switch fails", () => {
+    const load = page.slice(page.indexOf("async function loadSession("), page.indexOf("function renderList"));
+    expect(load).toContain("const previousId = detail ? detail.id : null");
+    expect(load).toContain("setInteractionBusy(true)");
+    expect(load).toContain('if (previousId) $("sess").value = previousId');
+    expect(load).toContain("setInteractionBusy(false)");
+    expect(page).toContain('document.querySelectorAll("footer button[data-a]")');
+    expect(page).toContain("button.disabled = busy || !detail");
+  });
+
+  it("treats desktop discovery diagnostics as a transactional refresh failure", () => {
+    const refresh = page.slice(page.indexOf("async function refreshSessions"), page.indexOf("let manualRefreshInFlight"));
+    expect(refresh).toContain('if (SURFACE === "desktop" && detail && data.issues && data.issues.length > 0)');
+    expect(refresh).toContain('return "diagnostic"');
+    expect(refresh.indexOf("return \"diagnostic\"")).toBeLessThan(refresh.indexOf("fillOptions"));
+    const manual = page.slice(page.indexOf("async function refreshCurrentSession"), page.indexOf('$("refresh").onclick'));
+    expect(manual).toContain('if (refreshResult === "diagnostic") return');
+    expect(manual).toContain('if (refreshResult === "failed")');
   });
 
   it("loads the first conversation when Recheck finds conversations after an empty start", () => {
@@ -207,6 +227,20 @@ describe("renderPage desktop surface", () => {
     expect(renderPage()).toContain('id="done"');
     expect(renderPage()).toContain("claude --resume");
     expect(renderPage()).not.toContain("9.9.9");
+  });
+});
+
+describe("desktopProjectLabel", () => {
+  const id = "019aaaaa-bbbb-4ccc-8ddd-eeeeffff0001";
+
+  it("replaces raw Claude and rollout identifiers with localized conversation labels", () => {
+    expect(desktopProjectLabel(`project-${id}`, "claude", id, "en")).toBe("Claude Code conversation");
+    expect(desktopProjectLabel(`rollout-2026-07-20-${id}`, "codex", id, "en")).toBe("Codex conversation");
+    expect(desktopProjectLabel(id, "codex", id, "zh-CN")).toBe("Codex 对话");
+  });
+
+  it("keeps a normal project basename", () => {
+    expect(desktopProjectLabel("airgap", "claude", id, "en")).toBe("airgap");
   });
 });
 

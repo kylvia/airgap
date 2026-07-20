@@ -2,13 +2,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import {
   claudeProjectsDir,
   codexSessionsDir,
   discoverSessions,
   discoverSessionsDetailed,
   mungeCwd,
+  readSessionCwdForDiscovery,
 } from "../src/discovery.js";
 
 const HOME = fileURLToPath(new URL("./fixtures/home", import.meta.url));
@@ -110,5 +111,45 @@ describe("discoverSessions", () => {
   it("treats missing stores as empty rather than diagnostic failures", async () => {
     const detailed = await discoverSessionsDetailed({ home: join(HOME, "definitely-missing") });
     expect(detailed).toEqual({ sessions: [], issues: [] });
+  });
+
+  it("records stat permission failures and continues discovering the other provider", async () => {
+    const baseline = await discoverSessions({ home: HOME, sources: ["claude"] });
+    const blockedFile = baseline[0]!.file;
+    const detailed = await discoverSessionsDetailed({ home: HOME }, {
+      statPath: async (target) => {
+        if (target === blockedFile) throw Object.assign(new Error("permission denied"), { code: "EPERM" });
+        return stat(target);
+      },
+    });
+
+    expect(detailed.sessions.some((session) => session.file === blockedFile)).toBe(false);
+    expect(detailed.sessions.some((session) => session.source === "codex")).toBe(true);
+    expect(detailed.issues).toContainEqual({
+      source: "claude",
+      provider: "Claude Code",
+      path: blockedFile,
+      code: "EPERM",
+    });
+  });
+
+  it("records JSONL read permission failures and continues discovering the other provider", async () => {
+    const baseline = await discoverSessions({ home: HOME, sources: ["claude"] });
+    const blockedFile = baseline[0]!.file;
+    const detailed = await discoverSessionsDetailed({ home: HOME }, {
+      readSessionCwd: async (target, maxLines) => {
+        if (target === blockedFile) throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+        return readSessionCwdForDiscovery(target, maxLines);
+      },
+    });
+
+    expect(detailed.sessions.some((session) => session.file === blockedFile)).toBe(false);
+    expect(detailed.sessions.some((session) => session.source === "codex")).toBe(true);
+    expect(detailed.issues).toContainEqual({
+      source: "claude",
+      provider: "Claude Code",
+      path: blockedFile,
+      code: "EACCES",
+    });
   });
 });

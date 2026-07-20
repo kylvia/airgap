@@ -1,4 +1,4 @@
-import type { Dirent } from "node:fs";
+import type { Dirent, Stats } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -37,11 +37,32 @@ export interface DetailedDiscoveryResult {
 
 export interface DiscoveryDependencies {
   readDirectory?: (dir: string) => Promise<Dirent[]>;
+  statPath?: (target: string) => Promise<Stats>;
+  readSessionCwd?: (file: string, maxLines: number) => Promise<string | null>;
 }
 
 interface DiscoveryContext {
   readDirectory: (dir: string) => Promise<Dirent[]>;
+  statPath: (target: string) => Promise<Stats>;
+  readSessionCwd: (file: string, maxLines: number) => Promise<string | null>;
   issues: DiscoveryIssue[];
+}
+
+function recordAccessIssue(
+  context: DiscoveryContext,
+  source: DiscoveryIssue["source"],
+  target: string,
+  error: unknown,
+): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code !== "EACCES" && code !== "EPERM") return false;
+  context.issues.push({
+    source,
+    provider: source === "claude" ? "Claude Code" : "Codex",
+    path: target,
+    code,
+  });
+  return true;
 }
 
 async function safeReaddir(
@@ -52,15 +73,7 @@ async function safeReaddir(
   try {
     return await context.readDirectory(dir);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "EACCES" || code === "EPERM") {
-      context.issues.push({
-        source,
-        provider: source === "claude" ? "Claude Code" : "Codex",
-        path: dir,
-        code,
-      });
-    }
+    recordAccessIssue(context, source, dir, error);
     return [];
   }
 }
@@ -71,7 +84,7 @@ async function safeReaddir(
  * payload. Some claude files start with a `summary` record without cwd, so we look at
  * up to `maxLines` records instead of only the first.
  */
-async function peekCwd(file: string, maxLines: number): Promise<string | null> {
+export async function readSessionCwdForDiscovery(file: string, maxLines: number): Promise<string | null> {
   let seen = 0;
   for await (const { line } of streamLines(file)) {
     if (++seen > maxLines) break;
@@ -122,12 +135,19 @@ async function discoverClaude(home: string, context: DiscoveryContext): Promise<
       const file = join(projDir, e.name);
       let st;
       try {
-        st = await stat(file);
-      } catch {
+        st = await context.statPath(file);
+      } catch (error) {
+        recordAccessIssue(context, "claude", file, error);
         continue;
       }
       const id = e.name.slice(0, -".jsonl".length);
-      const cwd = await peekCwd(file, 25);
+      let cwd: string | null;
+      try {
+        cwd = await context.readSessionCwd(file, 25);
+      } catch (error) {
+        if (recordAccessIssue(context, "claude", file, error)) continue;
+        throw error;
+      }
       out.push({
         source: "claude",
         id,
@@ -160,12 +180,19 @@ async function discoverCodex(home: string, context: DiscoveryContext): Promise<S
       if (!e.isFile() || !e.name.startsWith("rollout-") || !e.name.endsWith(".jsonl")) continue;
       let st;
       try {
-        st = await stat(p);
-      } catch {
+        st = await context.statPath(p);
+      } catch (error) {
+        recordAccessIssue(context, "codex", p, error);
         continue;
       }
       const id = ROLLOUT_UUID.exec(e.name)?.[1] ?? basename(e.name, ".jsonl");
-      const cwd = await peekCwd(p, 5);
+      let cwd: string | null;
+      try {
+        cwd = await context.readSessionCwd(p, 5);
+      } catch (error) {
+        if (recordAccessIssue(context, "codex", p, error)) continue;
+        throw error;
+      }
       out.push({
         source: "codex",
         id,
@@ -191,6 +218,8 @@ export async function discoverSessionsDetailed(
   const issues: DiscoveryIssue[] = [];
   const context: DiscoveryContext = {
     readDirectory: dependencies.readDirectory ?? ((dir) => readdir(dir, { withFileTypes: true })),
+    statPath: dependencies.statPath ?? stat,
+    readSessionCwd: dependencies.readSessionCwd ?? readSessionCwdForDiscovery,
     issues,
   };
   const out: SessionInfo[] = [];

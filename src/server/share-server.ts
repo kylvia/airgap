@@ -54,6 +54,21 @@ interface SessionSummary {
   title: string | null;
 }
 
+const UUID_IN_PROJECT = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+export function desktopProjectLabel(
+  project: string,
+  source: SessionInfo["source"],
+  sessionId: string,
+  locale: Locale,
+): string {
+  const looksOpaque = project.length === 0 || project.includes(sessionId) || UUID_IN_PROJECT.test(project);
+  if (!looksOpaque) return project;
+  return createI18n(locale).t(source === "claude"
+    ? "share.desktop.claudeConversation"
+    : "share.desktop.codexConversation");
+}
+
 interface TurnData {
   index: number;
   preview: string; // 用户文本前若干字，供左侧列表
@@ -129,6 +144,7 @@ async function listSessions(
   limit: number,
   ensureId?: string,
   includeIssues = false,
+  locale: Locale = "zh-CN",
 ): Promise<{ sessions: SessionSummary[]; issues: DiscoveryIssue[] }> {
   const discovery = includeIssues
     ? await discoverSessionsDetailed({})
@@ -143,13 +159,16 @@ async function listSessions(
   }
   // 标题并行流扫（peekTitle 只 parse 命中 ai-title 预过滤的行，几十个会话数百 ms 级）
   const summaries = await Promise.all(
-    top.map(async (s) => ({
-      id: s.id,
-      project: s.cwd ? path.basename(s.cwd) : s.project,
-      source: s.source,
-      mtimeMs: s.mtimeMs,
-      title: await peekTitle(s.file),
-    })),
+    top.map(async (s) => {
+      const project = s.cwd ? path.basename(s.cwd) : s.project;
+      return {
+        id: s.id,
+        project: includeIssues ? desktopProjectLabel(project, s.source, s.id, locale) : project,
+        source: s.source,
+        mtimeMs: s.mtimeMs,
+        title: await peekTitle(s.file),
+      };
+    }),
   );
   return { sessions: summaries, issues: discovery.issues };
 }
@@ -578,7 +597,7 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
     if (method === "GET" && p === "/api/sessions") {
       // ?ensure=<id>：前端焦点刷新时保证「当前正在看的会话」始终在列表里（可能比 limit 老）
       const ensure = url.searchParams.get("ensure") ?? opts.defaultSession;
-      const result = await listSessions(listLimit, ensure ?? undefined, surface === "desktop");
+      const result = await listSessions(listLimit, ensure ?? undefined, surface === "desktop", requestLocale);
       sendJson(res, 200, surface === "desktop"
         ? { sessions: result.sessions, limit: listLimit, issues: result.issues }
         : { sessions: result.sessions, limit: listLimit });

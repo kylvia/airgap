@@ -115,6 +115,8 @@ describe("createI18n", () => {
     const keys = [
       "share.desktop.title",
       "share.desktop.conversationLabel",
+      "share.desktop.claudeConversation",
+      "share.desktop.codexConversation",
       "share.desktop.recheck",
       "share.desktop.role.me",
       "share.desktop.role.assistant",

@@ -83,6 +83,8 @@ export const zhCN = {
   "share.page.closed": "已关闭，可以关掉这个标签页了。",
   "share.desktop.title": "分享对话",
   "share.desktop.conversationLabel": "{project} · {provider} · {time}",
+  "share.desktop.claudeConversation": "Claude Code 对话",
+  "share.desktop.codexConversation": "Codex 对话",
   "share.desktop.recheck": "重新检查",
   "share.desktop.role.me": "我",
   "share.desktop.role.assistant": "AI 助手",
