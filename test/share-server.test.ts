@@ -291,7 +291,7 @@ describe("renderPage desktop surface", () => {
 
   it("treats a native save cancellation as neither success nor failure", () => {
     const exportHandler = page.slice(page.indexOf("async function performExport"), page.indexOf("for (const btn"));
-    expect(exportHandler).toContain('if (res.code === "EXPORT_CANCELLED") return');
+    expect(exportHandler).toContain('if (res.code === "EXPORT_CANCELLED") { setStatus(msg("share.page.cancelled")); return; }');
   });
 
   it("serializes export actions and restores controls in finally", () => {
