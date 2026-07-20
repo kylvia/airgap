@@ -509,7 +509,7 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
   const port = await listen(server, opts.port);
   touch();
   return {
-    url: `http://localhost:${port}/`,
+    url: `http://127.0.0.1:${port}/`,
     close: () => {
       clearTimeout(idleTimer);
       server.close();

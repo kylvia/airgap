@@ -20,10 +20,10 @@ describe("share command", () => {
   });
 
   it("renders startup guidance in the resolved language", () => {
-    expect(shareStartupLines(createI18n("en"), true, "http://localhost:1/").join("\n")).toContain(
+    expect(shareStartupLines(createI18n("en"), true, "http://127.0.0.1:1/").join("\n")).toContain(
       "Select turns",
     );
-    expect(shareStartupLines(createI18n("zh-CN"), false, "http://localhost:1/").join("\n")).toContain(
+    expect(shareStartupLines(createI18n("zh-CN"), false, "http://127.0.0.1:1/").join("\n")).toContain(
       "勾选轮次",
     );
   });
@@ -57,7 +57,7 @@ describe("share command", () => {
     const script = [
       "(async () => {",
       `  const { openBrowser } = await import(${JSON.stringify(shareModuleUrl)});`,
-      '  openBrowser("http://localhost:43210/");',
+      '  openBrowser("http://127.0.0.1:43210/");',
       "  await new Promise((resolve) => setTimeout(resolve, 100));",
       "})().catch((error) => {",
       "  console.error(error);",

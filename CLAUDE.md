@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`airgap` — a zero-cloud CLI (npm package, ESM, Node ≥18) that scans local `~/.claude` / `~/.codex` AI-session transcripts for leaked secrets, packs a session into a redacted portable `.ccpack`, and re-installs it on another machine as a resumable Claude session. Also renders turns to Markdown/HTML/PNG (`show`) and serves a local picker UI (`share`).
+`airgap` — a zero-cloud CLI (npm package, ESM, Node ≥22) that scans local `~/.claude` / `~/.codex` AI-session transcripts for leaked secrets, packs a session into a redacted portable `.ccpack`, and re-installs it on another machine as a resumable Claude session. Also renders turns to Markdown/HTML/PNG (`show`) and serves a local picker UI (`share`).
 
 ## Commands
 
@@ -18,7 +18,7 @@ npm run typecheck    # tsc --noEmit (strict)
 scripts/canary-e2e.sh  # end-to-end smoke: synthesize session → pack → assert no plaintext leaks → open --print-only
 ```
 
-CI (`.github/workflows/ci.yml`) runs tests on Node 18/20/22. `canary.yml` runs `canary-e2e.sh` daily against the *latest* claude-code to detect on-disk session-format drift — if it goes red, the fix usually lives in `src/slice.ts` / `src/commands/open.ts`.
+CI (`.github/workflows/ci.yml`) runs tests on Node 22/24. `canary.yml` runs `canary-e2e.sh` daily against the *latest* claude-code to detect on-disk session-format drift — if it goes red, the fix usually lives in `src/slice.ts` / `src/commands/open.ts`.
 
 ## Key reference: CONTRACTS.md
 
