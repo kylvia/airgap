@@ -1,7 +1,9 @@
+import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createConnection } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuleMatch, Turn } from "../src/types.js";
 import { exportBlockReason, startShareServer } from "../src/server/share-server.js";
 import { renderPage, serializeForScript } from "../src/server/page.js";
@@ -24,6 +26,7 @@ async function tempHome(config?: string): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(tempHomes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
 });
 
@@ -152,7 +155,7 @@ describe("Share server locale wiring", () => {
       expect(response.status).toBe(404);
       await expect(response.json()).resolves.toEqual({ code: "NOT_FOUND", message: "Not found" });
     } finally {
-      server.close();
+      await server.close();
     }
   });
 
@@ -210,7 +213,7 @@ describe("Share server locale wiring", () => {
       expect(englishPage).toContain('<html lang="en">');
       expect(englishPage).toContain('<option value="auto" selected>Follow system</option>');
     } finally {
-      server.close();
+      await server.close();
     }
   });
 
@@ -226,7 +229,7 @@ describe("Share server locale wiring", () => {
       await expect(response.json()).resolves.toMatchObject({ code: "INVALID_LANGUAGE" });
       expect(await fetch(server.url).then((result) => result.text())).toContain('<html lang="en">');
     } finally {
-      server.close();
+      await server.close();
     }
   });
 
@@ -241,7 +244,7 @@ describe("Share server locale wiring", () => {
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({ code: "INVALID_CONFIG_BODY" });
     } finally {
-      server.close();
+      await server.close();
     }
   });
 
@@ -262,7 +265,141 @@ describe("Share server locale wiring", () => {
         message: "Not found",
       });
     } finally {
-      server.close();
+      await server.close();
+    }
+  });
+});
+
+describe("Share server lifecycle", () => {
+  it("closes after the configured idle timeout", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = await startShareServer({ idleTimeoutMs: 20 });
+    await vi.advanceTimersByTimeAsync(19);
+    expect(server.isClosed()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(server.closed).resolves.toBeUndefined();
+    expect(server.isClosed()).toBe(true);
+  });
+
+  it("stays open when the caller disables idle shutdown", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = await startShareServer({ idleTimeoutMs: null });
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    expect(server.isClosed()).toBe(false);
+    await server.close();
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects invalid idle timeout %s",
+    async (idleTimeoutMs) => {
+      await expect(startShareServer({ idleTimeoutMs })).rejects.toThrow(/idleTimeoutMs/);
+    },
+  );
+
+  it("resets the configured idle timeout after a request", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = await startShareServer({ idleTimeoutMs: 100 });
+    try {
+      await vi.advanceTimersByTimeAsync(60);
+      const response = await fetch(server.url);
+      expect(response.status).toBe(200);
+      await response.text();
+
+      await vi.advanceTimersByTimeAsync(60);
+      expect(server.isClosed()).toBe(false);
+      await vi.advanceTimersByTimeAsync(40);
+      await expect(server.closed).resolves.toBeUndefined();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("marks closing immediately and returns one close promise", async () => {
+    const server = await startShareServer({ idleTimeoutMs: null });
+    const firstClose = server.close();
+
+    expect(server.isClosed()).toBe(true);
+    expect(server.close()).toBe(firstClose);
+    await firstClose;
+  });
+
+  it("allows concurrent close calls and releases the listener before resolving", async () => {
+    const server = await startShareServer({ idleTimeoutMs: null });
+    const port = Number(new URL(server.url).port);
+
+    await Promise.all([server.close(), server.close()]);
+    await expect(server.closed).resolves.toBeUndefined();
+
+    const rebound = await startShareServer({ port, idleTimeoutMs: null });
+    try {
+      expect(Number(new URL(rebound.url).port)).toBe(port);
+    } finally {
+      await rebound.close();
+    }
+  });
+
+  it("keeps entryUrl equal to url before access control is enabled", async () => {
+    const server = await startShareServer({ idleTimeoutMs: null });
+    try {
+      expect(server.entryUrl).toBe(server.url);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("flushes the close response before shutting down", async () => {
+    const server = await startShareServer({ idleTimeoutMs: null });
+    const response = await fetch(new URL("/api/close", server.url), { method: "POST" });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    await expect(server.closed).resolves.toBeUndefined();
+  });
+
+  it("force-closes a hanging request after the bounded drain period", async () => {
+    const home = await tempHome();
+    let markRequestEntered!: () => void;
+    const requestEntered = new Promise<void>((resolve) => {
+      markRequestEntered = resolve;
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = await startShareServer({
+      idleTimeoutMs: null,
+      configHome: home,
+      systemLocaleDetector: async () => {
+        markRequestEntered();
+        return new Promise<never>(() => {});
+      },
+    });
+    const socket = createConnection({ host: "127.0.0.1", port: Number(new URL(server.url).port) });
+    socket.on("error", () => {});
+    try {
+      await once(socket, "connect");
+      const body = JSON.stringify({ language: "auto" });
+      socket.write(
+        "POST /api/config HTTP/1.1\r\n" +
+          "Host: 127.0.0.1\r\n" +
+          "Content-Type: application/json\r\n" +
+          `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n` +
+          body,
+      );
+      await requestEntered;
+
+      const closing = server.close();
+      expect(server.isClosed()).toBe(true);
+      let settled = false;
+      void server.closed.then(() => {
+        settled = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await closing;
+      expect(socket.destroyed).toBe(true);
+    } finally {
+      socket.destroy();
+      await server.close();
     }
   });
 });

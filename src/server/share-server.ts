@@ -26,6 +26,7 @@ import {
 import { detectSystemLocale, type SystemLocaleResult } from "../i18n/system.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
+const SHUTDOWN_DRAIN_TIMEOUT_MS = 1_000;
 
 // 复制到系统剪贴板走 osascript/pbcopy，只有 macOS 支持；页面据此把「下载 PNG」设为非 mac 的主按钮。
 const isMac = process.platform === "darwin";
@@ -328,12 +329,16 @@ function sendJson(res: ServerResponse, status: number, obj: unknown): void {
 
 export interface ShareServer {
   url: string;
-  close(): void;
+  entryUrl: string;
+  closed: Promise<void>;
+  isClosed(): boolean;
+  close(): Promise<void>;
 }
 
 export interface ShareServerOptions {
   port?: number;
   defaultSession?: string;
+  idleTimeoutMs?: number | null;
   locale?: Locale;
   languagePreference?: LanguagePreference;
   configHome?: string;
@@ -341,6 +346,14 @@ export interface ShareServerOptions {
 }
 
 export async function startShareServer(opts: ShareServerOptions): Promise<ShareServer> {
+  if (
+    opts.idleTimeoutMs !== undefined &&
+    opts.idleTimeoutMs !== null &&
+    (!Number.isFinite(opts.idleTimeoutMs) || opts.idleTimeoutMs <= 0)
+  ) {
+    throw new TypeError("idleTimeoutMs must be a finite positive number, null, or undefined");
+  }
+
   let locale = opts.locale ?? "zh-CN";
   let i18n = createI18n(locale);
   let languagePreference = opts.languagePreference ?? locale;
@@ -349,18 +362,54 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
   const bootCfg = await loadConfig(opts.configHome);
   let listLimit = sessionListLimit(bootCfg);
   let toolDisplay = shareToolDisplay(bootCfg);
-  let idleTimer: NodeJS.Timeout;
+  const idleTimeoutMs = opts.idleTimeoutMs === undefined ? IDLE_TIMEOUT_MS : opts.idleTimeoutMs;
+  let idleTimer: NodeJS.Timeout | undefined;
+  let closeStarted = false;
+  let closedState = false;
+  let resolveClosed!: () => void;
+  let rejectClosed!: (reason: unknown) => void;
+  const closed = new Promise<void>((resolve, reject) => {
+    resolveClosed = resolve;
+    rejectClosed = reject;
+  });
+
+  let server: Server;
+  const close = (): Promise<void> => {
+    if (closeStarted) return closed;
+    closeStarted = true;
+    closedState = true;
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+
+    if (!server.listening) {
+      resolveClosed();
+      return closed;
+    }
+
+    const drainTimer = setTimeout(() => {
+      server.closeAllConnections();
+    }, SHUTDOWN_DRAIN_TIMEOUT_MS);
+    server.close((error) => {
+      clearTimeout(drainTimer);
+      if (error) {
+        rejectClosed(error);
+        return;
+      }
+      resolveClosed();
+    });
+    return closed;
+  };
+
   const touch = (): void => {
-    clearTimeout(idleTimer);
+    if (idleTimeoutMs === null || closeStarted) return;
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       // eslint-disable-next-line no-console
       console.log(i18n.t("share.server.idle"));
-      server.close();
-      process.exit(0);
-    }, IDLE_TIMEOUT_MS);
+      void close();
+    }, idleTimeoutMs);
   };
 
-  const server: Server = createServer((req, res) => {
+  server = createServer((req, res) => {
     touch();
     const requestLocale = locale;
     const requestI18n = i18n;
@@ -496,11 +545,8 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
       return;
     }
     if (req.method === "POST" && p === "/api/close") {
+      res.once("finish", () => void close());
       sendJson(res, 200, { ok: true });
-      setTimeout(() => {
-        server.close();
-        process.exit(0);
-      }, 100);
       return;
     }
     sendJson(res, 404, { code: "NOT_FOUND", message: requestI18n.t("share.api.notFound") });
@@ -508,12 +554,13 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
 
   const port = await listen(server, opts.port);
   touch();
+  const url = `http://127.0.0.1:${port}/`;
   return {
-    url: `http://127.0.0.1:${port}/`,
-    close: () => {
-      clearTimeout(idleTimer);
-      server.close();
-    },
+    url,
+    entryUrl: url,
+    closed,
+    isClosed: () => closedState,
+    close,
   };
 }
 
