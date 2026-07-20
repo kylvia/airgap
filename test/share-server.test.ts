@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuleMatch, Turn } from "../src/types.js";
 import { createShareAccessToken, shareCookieName } from "../src/server/share-access.js";
 import { desktopProjectLabel, exportBlockReason, startShareServer } from "../src/server/share-server.js";
+import type { ShareExportAdapter } from "../src/server/share-export.js";
 import { renderPage, serializeForScript } from "../src/server/page.js";
 
 const scan = (s: string): RuleMatch[] =>
@@ -24,6 +25,16 @@ async function tempHome(config?: string): Promise<string> {
     await writeFile(path.join(home, ".airgap", "config.json"), config, "utf8");
   }
   return home;
+}
+
+async function tempHomeWithClaudeSession(): Promise<{ home: string; sessionId: string }> {
+  const home = await tempHome();
+  const sessionId = "s-claude-mini";
+  const projectDir = path.join(home, ".claude", "projects", "-tmp-demo");
+  await mkdir(projectDir, { recursive: true });
+  const fixture = await readFile(new URL("./fixtures/claude-mini.jsonl", import.meta.url), "utf8");
+  await writeFile(path.join(projectDir, `${sessionId}.jsonl`), fixture, "utf8");
+  return { home, sessionId };
 }
 
 afterEach(async () => {
@@ -276,6 +287,11 @@ describe("renderPage desktop surface", () => {
     expect(exportHandler).toContain("confirm(res.message");
     expect(exportHandler).toContain("desktopExportMessage(action, format, res.ok) || res.message");
     expect(exportHandler).toContain("desktopExportMessage(action, format, false)");
+  });
+
+  it("treats a native save cancellation as neither success nor failure", () => {
+    const exportHandler = page.slice(page.indexOf("async function performExport"), page.indexOf("for (const btn"));
+    expect(exportHandler).toContain('if (res.code === "EXPORT_CANCELLED") return');
   });
 
   it("serializes export actions and restores controls in finally", () => {
@@ -590,6 +606,111 @@ describe("Share server locale wiring", () => {
       });
     } finally {
       await server.close();
+    }
+  });
+});
+
+describe("Share server export adapter wiring", () => {
+  it("counts an export from route entry before its request body finishes", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const adapter: ShareExportAdapter = {
+      renderPng: vi.fn(async () => Buffer.from("png")),
+      saveFile: vi.fn(async () => "/unused"),
+    };
+    const server = await startShareServer({ idleTimeoutMs: null, exportAdapter: adapter });
+    const socket = createConnection({ host: "127.0.0.1", port: Number(new URL(server.url).port) });
+    try {
+      await once(socket, "connect");
+      socket.write(
+        "POST /api/export HTTP/1.1\r\n" +
+        `Host: ${new URL(server.url).host}\r\n` +
+        "Content-Type: application/json\r\n" +
+        "Content-Length: 100\r\n" +
+        "Connection: close\r\n\r\n{",
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      let idle = false;
+      const waiting = server.whenExportsIdle().then(() => { idle = true; });
+      await Promise.resolve();
+      expect(idle).toBe(false);
+
+      socket.destroy();
+      await waiting;
+      expect(idle).toBe(true);
+      expect(adapter.renderPng).not.toHaveBeenCalled();
+    } finally {
+      socket.destroy();
+      await server.close();
+      error.mockRestore();
+    }
+  });
+
+  it("exposes export idleness and returns a neutral HTTP 200 cancellation", async () => {
+    const { home, sessionId } = await tempHomeWithClaudeSession();
+    const previousHome = process.env["HOME"];
+    process.env["HOME"] = home;
+    let finishSave!: (value: string | null) => void;
+    const saveFile = vi.fn(() => new Promise<string | null>((resolve) => { finishSave = resolve; }));
+    const adapter: ShareExportAdapter = {
+      renderPng: vi.fn(async () => Buffer.from("png")),
+      copyImage: vi.fn(async () => {}),
+      copyText: vi.fn(async () => {}),
+      saveFile,
+    };
+    const server = await startShareServer({ idleTimeoutMs: null, configHome: home, exportAdapter: adapter });
+    try {
+      const exporting = fetch(new URL("/api/export", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId, turns: [1], format: "png", action: "save", redact: true, tools: "summary" }),
+      });
+      await vi.waitFor(() => expect(saveFile).toHaveBeenCalledOnce());
+      let idle = false;
+      const waiting = server.whenExportsIdle().then(() => { idle = true; });
+      await Promise.resolve();
+      expect(idle).toBe(false);
+
+      finishSave(null);
+      const response = await exporting;
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        cancelled: true,
+        code: "EXPORT_CANCELLED",
+      });
+      await waiting;
+      expect(idle).toBe(true);
+    } finally {
+      await server.close();
+      if (previousHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = previousHome;
+    }
+  });
+
+  it("maps capture failures to HTTP 500 without invoking save", async () => {
+    const { home, sessionId } = await tempHomeWithClaudeSession();
+    const previousHome = process.env["HOME"];
+    process.env["HOME"] = home;
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const adapter: ShareExportAdapter = {
+      renderPng: vi.fn(async () => { throw new Error("capture failed"); }),
+      saveFile: vi.fn(async () => "/unused"),
+    };
+    const server = await startShareServer({ idleTimeoutMs: null, configHome: home, exportAdapter: adapter });
+    try {
+      const response = await fetch(new URL("/api/export", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId, turns: [1], format: "png", action: "save", redact: true, tools: "summary" }),
+      });
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({ ok: false, code: "EXPORT_CAPTURE_FAILED" });
+      expect(adapter.saveFile).not.toHaveBeenCalled();
+    } finally {
+      await server.close();
+      if (previousHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = previousHome;
+      error.mockRestore();
     }
   });
 });

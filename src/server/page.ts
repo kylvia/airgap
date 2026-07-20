@@ -751,6 +751,8 @@ async function performExport(action, format, acceptRisk) {
       if (confirm(res.message + "\\n" + msg("share.page.confirmAgain"))) return performExport(action, format, true);
       setStatus(msg("share.page.cancelled"), true); return;
     }
+    // 原生保存框取消是一次无结果的用户选择，不应被说成成功或失败，也不改变当前勾选。
+    if (res.code === "EXPORT_CANCELLED") return;
     setStatus(desktopExportMessage(action, format, res.ok) || res.message, !res.ok);
   } catch (error) {
     const message = desktopExportMessage(action, format, false);
