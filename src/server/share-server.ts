@@ -397,6 +397,7 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
     const requestI18n = i18n;
     const requestLanguagePreference = languagePreference;
     void handle(req, res, requestLocale, requestI18n, requestLanguagePreference).catch((err: unknown) => {
+      if (req.aborted || res.destroyed) return;
       console.error(err instanceof Error ? err.message : String(err));
       sendJson(res, 500, { ok: false, code: "INTERNAL_ERROR", message: requestI18n.t("share.api.internal") });
     });

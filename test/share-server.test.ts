@@ -669,6 +669,8 @@ describe("Share server export adapter wiring", () => {
       await waiting;
       expect(idle).toBe(true);
       expect(adapter.renderPng).not.toHaveBeenCalled();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(error).not.toHaveBeenCalled();
     } finally {
       socket.destroy();
       await server.close();
