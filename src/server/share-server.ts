@@ -26,6 +26,7 @@ import {
 import { detectSystemLocale, type SystemLocaleResult } from "../i18n/system.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const SHUTDOWN_DRAIN_TIMEOUT_MS = 1_000;
 
 // 复制到系统剪贴板走 osascript/pbcopy，只有 macOS 支持；页面据此把「下载 PNG」设为非 mac 的主按钮。
@@ -349,9 +350,11 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
   if (
     opts.idleTimeoutMs !== undefined &&
     opts.idleTimeoutMs !== null &&
-    (!Number.isFinite(opts.idleTimeoutMs) || opts.idleTimeoutMs <= 0)
+    (!Number.isFinite(opts.idleTimeoutMs) ||
+      opts.idleTimeoutMs <= 0 ||
+      opts.idleTimeoutMs > MAX_TIMER_DELAY_MS)
   ) {
-    throw new TypeError("idleTimeoutMs must be a finite positive number, null, or undefined");
+    throw new TypeError(`idleTimeoutMs must be between 1 and ${MAX_TIMER_DELAY_MS}, null, or undefined`);
   }
 
   let locale = opts.locale ?? "zh-CN";

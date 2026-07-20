@@ -289,7 +289,7 @@ describe("Share server lifecycle", () => {
     await server.close();
   });
 
-  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648, Number.MAX_SAFE_INTEGER])(
     "rejects invalid idle timeout %s",
     async (idleTimeoutMs) => {
       await expect(startShareServer({ idleTimeoutMs })).rejects.toThrow(/idleTimeoutMs/);
