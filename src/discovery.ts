@@ -1,7 +1,7 @@
 import type { Dirent, Stats } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import type { DiscoverOptions, SessionInfo, SidecarFiles } from "./types.js";
 import { streamLines, tryParse } from "./util/jsonl.js";
 
@@ -46,6 +46,16 @@ interface DiscoveryContext {
   statPath: (target: string) => Promise<Stats>;
   readSessionCwd: (file: string, maxLines: number) => Promise<string | null>;
   issues: DiscoveryIssue[];
+  storeRoots: Record<DiscoveryIssue["source"], string>;
+}
+
+function diagnosticPath(context: DiscoveryContext, source: DiscoveryIssue["source"], target: string): string {
+  const root = context.storeRoots[source];
+  if (source === "codex") return root;
+  const suffix = relative(root, target);
+  if (!suffix || suffix === ".." || suffix.startsWith(`..${sep}`)) return root;
+  const project = suffix.split(sep)[0];
+  return project ? join(root, project) : root;
 }
 
 function recordAccessIssue(
@@ -59,7 +69,7 @@ function recordAccessIssue(
   context.issues.push({
     source,
     provider: source === "claude" ? "Claude Code" : "Codex",
-    path: target,
+    path: diagnosticPath(context, source, target),
     code,
   });
   return true;
@@ -221,6 +231,10 @@ export async function discoverSessionsDetailed(
     statPath: dependencies.statPath ?? stat,
     readSessionCwd: dependencies.readSessionCwd ?? readSessionCwdForDiscovery,
     issues,
+    storeRoots: {
+      claude: claudeProjectsDir(home),
+      codex: codexSessionsDir(home),
+    },
   };
   const out: SessionInfo[] = [];
   if (sources.includes("claude")) out.push(...(await discoverClaude(home, context)));

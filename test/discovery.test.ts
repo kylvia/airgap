@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { Dirent } from "node:fs";
@@ -128,9 +128,11 @@ describe("discoverSessions", () => {
     expect(detailed.issues).toContainEqual({
       source: "claude",
       provider: "Claude Code",
-      path: blockedFile,
+      path: join(claudeProjectsDir(HOME), blockedFile.slice(claudeProjectsDir(HOME).length + 1).split("/")[0]!),
       code: "EPERM",
     });
+    expect(detailed.issues[0]!.path).not.toContain(basename(blockedFile));
+    expect(detailed.issues[0]!.path).not.toContain(basename(blockedFile, ".jsonl"));
   });
 
   it("records JSONL read permission failures and continues discovering the other provider", async () => {
@@ -148,8 +150,30 @@ describe("discoverSessions", () => {
     expect(detailed.issues).toContainEqual({
       source: "claude",
       provider: "Claude Code",
-      path: blockedFile,
+      path: join(claudeProjectsDir(HOME), blockedFile.slice(claudeProjectsDir(HOME).length + 1).split("/")[0]!),
       code: "EACCES",
     });
+    expect(detailed.issues[0]!.path).not.toContain(basename(blockedFile));
+  });
+
+  it("never exposes Codex transcript filenames or session UUIDs in access diagnostics", async () => {
+    const baseline = await discoverSessions({ home: HOME, sources: ["codex"] });
+    const blockedFile = baseline[0]!.file;
+    const detailed = await discoverSessionsDetailed({ home: HOME, sources: ["codex"] }, {
+      statPath: async (target) => {
+        if (target === blockedFile) throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+        return stat(target);
+      },
+    });
+
+    expect(detailed.sessions).toEqual([]);
+    expect(detailed.issues).toEqual([{
+      source: "codex",
+      provider: "Codex",
+      path: codexSessionsDir(HOME),
+      code: "EACCES",
+    }]);
+    expect(detailed.issues[0]!.path).not.toContain(basename(blockedFile));
+    expect(detailed.issues[0]!.path).not.toContain(baseline[0]!.id);
   });
 });

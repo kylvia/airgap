@@ -101,7 +101,9 @@ export function renderPage(
   body[data-surface="desktop"] .left .bar button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   body[data-surface="desktop"] footer .rdct-copy { display: flex; flex-direction: column; gap: 2px; }
   body[data-surface="desktop"] footer .rdct-copy small { color: var(--fg-subtle); font-size: 11px; }
-  body[data-surface="desktop"] footer .status { min-width: 180px; }` : "";
+  body[data-surface="desktop"] footer .status { min-width: 180px; }
+  body[data-surface="desktop"] footer button:disabled { cursor: default; opacity: 0.45; }
+  body[data-surface="desktop"] footer button:disabled:hover { transform: none; }` : "";
   const testId = (name: string): string => isDesktop ? ` data-testid="${name}"` : "";
   const sidMarkup = isDesktop
     ? ""
@@ -111,7 +113,7 @@ export function renderPage(
       <h2>${escapeHtml(t("share.desktop.settings"))}</h2>
       <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language" aria-label="${escapeHtml(t("share.page.language"))}">${languageOptions}</select></div>
       <details><summary>${escapeHtml(t("share.desktop.advanced"))}</summary>
-        <div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit" aria-label="${escapeHtml(t("share.desktop.sessionListLabel"))}">
+        <div class="prow"><span>${escapeHtml(t("share.desktop.conversationList"))}</span><select id="limit" aria-label="${escapeHtml(t("share.desktop.sessionListLabel"))}">
           <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
           <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
           <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
@@ -182,7 +184,7 @@ export function renderPage(
     ? "// Change the conversation limit in the shared Airgap settings."
     : "// 页面上改条数 = 写回 ~/.airgap/config.json（与配置文件同一真源），成功后按新条数重拉列表。";
   const selectionControlsMarkup = isDesktop
-    ? `<button type="button" id="all">${escapeHtml(t("share.page.selectAll"))}</button><button type="button" id="none">${escapeHtml(t("share.page.clear"))}</button>`
+    ? `<button type="button" id="all" disabled>${escapeHtml(t("share.page.selectAll"))}</button><button type="button" id="none" disabled>${escapeHtml(t("share.page.clear"))}</button>`
     : `<a id="all">${escapeHtml(t("share.page.selectAll"))}</a><a id="none">${escapeHtml(t("share.page.clear"))}</a>`;
   return `<!DOCTYPE html>
 <html lang="${locale}">
@@ -322,9 +324,19 @@ const WARN_MARK = ${JSON.stringify(warnMark)};
 let detail = null;            // 当前会话 {id,title,date,turns:[]}
 const selected = new Set();   // 选中的轮次 index
 let pvReady = false;          // 预览 iframe 是否已加载好
+let discoveryIssueMessage = null;
+let exportInFlight = false;
 
 const $ = (id) => document.getElementById(id);
 function setStatus(msg, err) { const s = $("status"); s.textContent = msg; s.className = "status" + (err ? " err" : ""); }
+
+function setSelectionControlsDisabled(disabled) {
+  if (SURFACE !== "desktop") return;
+  for (const id of ["all", "none"]) {
+    const control = $(id);
+    control.disabled = disabled;
+  }
+}
 
 function setInteractionBusy(busy) {
   const picker = $("sess");
@@ -332,6 +344,12 @@ function setInteractionBusy(busy) {
   for (const button of document.querySelectorAll("footer button[data-a]")) {
     button.disabled = busy || !detail;
   }
+  setSelectionControlsDisabled(busy || !detail);
+}
+
+function setEmptyStateVisible(state, visible) {
+  state.hidden = !visible;
+  setSelectionControlsDisabled(visible || !detail);
 }
 
 function desktopExportMessage(action, format, ok) {
@@ -406,13 +424,14 @@ function showDiscoveryState(sessions, issues) {
   const body = $("empty-body");
   const help = $("permission-help");
   const issue = issues[0];
+  discoveryIssueMessage = issue ? discoveryDiagnostic(issue) : null;
   if (issue) {
-    const message = discoveryDiagnostic(issue);
+    const message = discoveryIssueMessage;
     if (sessions.length > 0) {
-      state.hidden = true;
+      setEmptyStateVisible(state, false);
       setStatus(message, true);
     } else {
-      state.hidden = false;
+      setEmptyStateVisible(state, true);
       title.textContent = issue.provider || providerName(issue.source);
       body.textContent = message;
       help.hidden = false;
@@ -423,14 +442,14 @@ function showDiscoveryState(sessions, issues) {
   help.hidden = true;
   title.textContent = msg("share.desktop.emptyTitle");
   body.textContent = msg("share.desktop.emptyBody");
-  state.hidden = sessions.length > 0;
+  setEmptyStateVisible(state, sessions.length === 0);
   if (!state.hidden) state.focus();
 }
 
 function showStartupError() {
   if (SURFACE !== "desktop") return;
   const state = $("empty-state");
-  state.hidden = false;
+  setEmptyStateVisible(state, true);
   $("empty-title").textContent = msg("share.desktop.startupError");
   $("empty-body").textContent = msg("share.desktop.localOnly");
   $("permission-help").hidden = true;
@@ -446,8 +465,13 @@ async function refreshSessions() {
   if (!r.ok) return "failed";
   const data = await r.json();
   if (SURFACE === "desktop" && detail && data.issues && data.issues.length > 0) {
-    setStatus(discoveryDiagnostic(data.issues[0]), true);
+    showDiscoveryState(data.sessions, data.issues);
     return "diagnostic";
+  }
+  if (SURFACE === "desktop" && detail && !data.sessions.some((session) => session.id === detail.id)) {
+    discoveryIssueMessage = null;
+    setStatus(msg("share.desktop.currentUnavailable"), true);
+    return "unavailable";
   }
   fillOptions(data.sessions, detail ? detail.id : null);
   syncLimitSelect(data.limit);
@@ -463,9 +487,9 @@ async function refreshCurrentSession() {
   button.setAttribute("aria-busy", "true");
   try {
     const refreshResult = await refreshSessions();
-    if (refreshResult === "diagnostic") return;
+    if (refreshResult === "diagnostic" || refreshResult === "unavailable") return;
     if (refreshResult === "failed") {
-      setStatus(msg("share.page.refreshListFailed"), true);
+      setStatus(msg(SURFACE === "desktop" ? "share.desktop.refreshListFailed" : "share.page.refreshListFailed"), true);
       return;
     }
     if (!detail) {
@@ -473,12 +497,12 @@ async function refreshCurrentSession() {
         await loadSession($("sess").value);
         return;
       }
-      setStatus(msg("share.page.listRefreshed"));
+      setStatus(msg(SURFACE === "desktop" ? "share.desktop.listRefreshed" : "share.page.listRefreshed"));
       return;
     }
-    await loadSession(detail.id, true, msg("share.page.sessionRefreshed"));
+    await loadSession(detail.id, true, msg(SURFACE === "desktop" ? "share.desktop.conversationRefreshed" : "share.page.sessionRefreshed"));
   } catch {
-    setStatus(msg("share.page.refreshFailed"), true);
+    setStatus(msg(SURFACE === "desktop" ? "share.desktop.refreshFailed" : "share.page.refreshFailed"), true);
   } finally {
     button.disabled = false;
     button.removeAttribute("aria-busy");
@@ -497,7 +521,7 @@ $("limit").onchange = async () => {
     return;
   }
   setStatus(SURFACE === "desktop"
-    ? msg("share.page.listRefreshed")
+    ? msg("share.desktop.listRefreshed")
     : msg("share.page.listSaved", { count: res.limit }));
   await refreshSessions();
 };
@@ -526,7 +550,7 @@ async function loadSession(id, keepSelection, refreshedStatus) {
     const r = await fetch("/api/session/" + encodeURIComponent(id) + "?tools=" + encodeURIComponent($("tools").value));
     if (!r.ok) {
       if (previousId) $("sess").value = previousId;
-      setStatus(msg("share.page.loadFailed"), true);
+      setStatus(msg(SURFACE === "desktop" ? "share.desktop.loadFailed" : "share.page.loadFailed"), true);
       return false;
     }
     detail = await r.json();
@@ -540,7 +564,8 @@ async function loadSession(id, keepSelection, refreshedStatus) {
     }
     renderList(); buildPreviewShell();
 ${sidScript}
-    setStatus(keepSelection
+    if (discoveryIssueMessage) setStatus(discoveryIssueMessage, true);
+    else setStatus(keepSelection
       ? refreshedStatus || msg("share.page.toolRefreshed")
       : msg("share.page.loadedSummary", { turns: detail.turns.length, selected: selected.size }));
     return true;
@@ -631,6 +656,18 @@ function syncPreview(scrollTo) {
 function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
 async function doExport(action, format, acceptRisk) {
+  if (exportInFlight) return;
+  exportInFlight = true;
+  setInteractionBusy(true);
+  try {
+    return await performExport(action, format, acceptRisk);
+  } finally {
+    exportInFlight = false;
+    setInteractionBusy(false);
+  }
+}
+
+async function performExport(action, format, acceptRisk) {
   if (!detail || selected.size === 0) { setStatus(msg("share.page.selectOne"), true); return; }
   const redact = $("redact").checked;
   const risky = detail.turns.filter((t) => selected.has(t.index) && t.findings > 0);
@@ -652,7 +689,7 @@ async function doExport(action, format, acceptRisk) {
     const res = await r.json();
     // 服务端拦截（原样导出且命中，或有人绕过 UI）：确认后带 acceptRisk 重试一次。
     if (r.status === 409 && res.blocked) {
-      if (confirm(res.message + "\\n" + msg("share.page.confirmAgain"))) return doExport(action, format, true);
+      if (confirm(res.message + "\\n" + msg("share.page.confirmAgain"))) return performExport(action, format, true);
       setStatus(msg("share.page.cancelled"), true); return;
     }
     setStatus(desktopExportMessage(action, format, res.ok) || res.message, !res.ok);
@@ -666,8 +703,8 @@ async function doExport(action, format, acceptRisk) {
 for (const btn of document.querySelectorAll("footer button[data-a]")) {
   btn.onclick = () => doExport(btn.dataset.a, btn.dataset.f);
 }
-$("all").onclick = () => { for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
-$("none").onclick = () => { selected.clear(); renderList(); updateCount(); syncPreview(null); };
+$("all").onclick = () => { if (!detail) return; for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
+$("none").onclick = () => { if (!detail) return; selected.clear(); renderList(); updateCount(); syncPreview(null); };
 // 设置面板开关：点按钮 toggle；点面板外或按 Esc 关闭（面板内点击冒泡到 document 时被 contains 放行）。
 function setPreferencesOpen(open, restoreFocus) {
   const panel = $("prefpanel");
@@ -678,7 +715,7 @@ function setPreferencesOpen(open, restoreFocus) {
 }
 $("prefs").onclick = (e) => { e.stopPropagation(); setPreferencesOpen($("prefpanel").hidden, false); };
 document.addEventListener("click", (e) => { const p = $("prefpanel"); if (!p.hidden && !p.contains(e.target)) setPreferencesOpen(false, false); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") setPreferencesOpen(false, true); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("prefpanel").hidden) setPreferencesOpen(false, true); });
 // 切换工具展示级别：服务端按新级别重渲各轮片段（预览=导出，物理裁剪而非 CSS 隐藏），保留已勾选轮次；
 // 同时静默持久化到 config.json——先等预览刷新（用户在等它），保存失败的提示最后落地不被刷新提示覆盖。
 $("tools").onchange = async () => {

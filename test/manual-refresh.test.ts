@@ -24,12 +24,11 @@ describe("share picker manual refresh", () => {
     expect(source).toContain("let manualRefreshInFlight = false");
     expect(source).toContain("if (manualRefreshInFlight) return;");
     expect(source).toContain("await refreshSessions()");
-    expect(source).toContain(
-      'await loadSession(detail.id, true, msg("share.page.sessionRefreshed"))',
-    );
+    expect(source).toContain('await loadSession(detail.id, true, msg(SURFACE === "desktop"');
+    expect(source).toContain('"share.desktop.conversationRefreshed" : "share.page.sessionRefreshed"');
     expect(source).toContain("button.disabled = false");
     expect(source).toContain('button.removeAttribute("aria-busy")');
-    expect(source).toContain('setStatus(msg("share.page.refreshFailed"), true)');
+    expect(source).toContain('"share.desktop.refreshFailed" : "share.page.refreshFailed"');
     expect(source).not.toMatch(/setInterval|WebSocket/);
   });
 });

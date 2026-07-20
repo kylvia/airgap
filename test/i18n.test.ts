@@ -147,6 +147,13 @@ describe("createI18n", () => {
       "share.desktop.saveImageSuccess",
       "share.desktop.saveImageFailed",
       "share.desktop.settingsSaveFailed",
+      "share.desktop.conversationList",
+      "share.desktop.currentUnavailable",
+      "share.desktop.listRefreshed",
+      "share.desktop.conversationRefreshed",
+      "share.desktop.refreshListFailed",
+      "share.desktop.refreshFailed",
+      "share.desktop.loadFailed",
     ] as const;
 
     for (const key of keys) {

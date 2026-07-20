@@ -213,8 +213,28 @@ describe("renderPage desktop surface", () => {
     expect(refresh).toContain('return "diagnostic"');
     expect(refresh.indexOf("return \"diagnostic\"")).toBeLessThan(refresh.indexOf("fillOptions"));
     const manual = page.slice(page.indexOf("async function refreshCurrentSession"), page.indexOf('$("refresh").onclick'));
-    expect(manual).toContain('if (refreshResult === "diagnostic") return');
+    expect(manual).toContain('refreshResult === "diagnostic"');
     expect(manual).toContain('if (refreshResult === "failed")');
+  });
+
+  it("does not commit a refreshed picker that omits the loaded conversation", () => {
+    const refresh = page.slice(page.indexOf("async function refreshSessions"), page.indexOf("let manualRefreshInFlight"));
+    expect(refresh).toContain('!data.sessions.some((session) => session.id === detail.id)');
+    expect(refresh).toContain('setStatus(msg("share.desktop.currentUnavailable"), true)');
+    expect(refresh).toContain('return "unavailable"');
+    expect(refresh.indexOf('return "unavailable"')).toBeLessThan(refresh.indexOf("fillOptions"));
+
+    const manual = page.slice(page.indexOf("async function refreshCurrentSession"), page.indexOf('$("refresh").onclick'));
+    expect(manual).toContain('refreshResult === "unavailable"');
+    expect(page).toContain("refreshSessions().catch(() => {})");
+  });
+
+  it("keeps partial-provider diagnostics visible after a successful initial load", () => {
+    expect(page).toContain("let discoveryIssueMessage = null");
+    const discovery = page.slice(page.indexOf("function showDiscoveryState"), page.indexOf("function showStartupError"));
+    expect(discovery).toContain("discoveryIssueMessage = issue ? discoveryDiagnostic(issue) : null");
+    const load = page.slice(page.indexOf("async function loadSession("), page.indexOf("function renderList"));
+    expect(load).toContain("if (discoveryIssueMessage) setStatus(discoveryIssueMessage, true)");
   });
 
   it("loads the first conversation when Recheck finds conversations after an empty start", () => {
@@ -234,6 +254,18 @@ describe("renderPage desktop surface", () => {
     expect(exportHandler).toContain("desktopExportMessage(action, format, false)");
   });
 
+  it("serializes export actions and restores controls in finally", () => {
+    expect(page).toContain("let exportInFlight = false");
+    const exportHandler = page.slice(page.indexOf("async function doExport"), page.indexOf("for (const btn"));
+    expect(exportHandler).toContain("if (exportInFlight) return");
+    expect(exportHandler).toContain("exportInFlight = true");
+    expect(exportHandler).toContain("setInteractionBusy(true)");
+    expect(exportHandler).toContain("finally");
+    expect(exportHandler).toContain("exportInFlight = false");
+    expect(exportHandler).toContain("setInteractionBusy(false)");
+    expect(exportHandler).toContain("return performExport(action, format, true)");
+  });
+
   it("uses generic desktop settings failures instead of server paths", () => {
     expect(page).toContain('function desktopSettingsError() { return msg("share.desktop.settingsSaveFailed"); }');
     expect(page).toContain('SURFACE === "desktop" ? desktopSettingsError() : res.message');
@@ -245,8 +277,8 @@ describe("renderPage desktop surface", () => {
     expect(page).toMatch(/<select id="limit"[^>]*aria-label="Conversation list size"/);
     expect(page).toMatch(/<select id="tools"[^>]*aria-label="Tool display"/);
     expect(page).toContain('<iframe id="preview" data-testid="preview" title="Conversation preview"></iframe>');
-    expect(page).toContain('<button type="button" id="all">Select all</button>');
-    expect(page).toContain('<button type="button" id="none">Clear</button>');
+    expect(page).toContain('<button type="button" id="all" disabled>Select all</button>');
+    expect(page).toContain('<button type="button" id="none" disabled>Clear</button>');
 
     const browser = renderPage(undefined, "summary", true, "en", "en", "browser");
     expect(browser).toContain('<a id="all">Select all</a><a id="none">Clear</a>');
@@ -260,7 +292,7 @@ describe("renderPage desktop surface", () => {
     expect(page).toContain("function setPreferencesOpen(open, restoreFocus)");
     expect(page).toContain('button.setAttribute("aria-expanded", String(open))');
     expect(page).toContain("if (restoreFocus) button.focus()");
-    expect(page).toContain('if (e.key === "Escape") setPreferencesOpen(false, true)');
+    expect(page).toContain('if (e.key === "Escape" && !$("prefpanel").hidden) setPreferencesOpen(false, true)');
   });
 
   it("starts desktop picker and export actions disabled and restores them from shared state", () => {
@@ -269,6 +301,29 @@ describe("renderPage desktop surface", () => {
     expect(page).toMatch(/<button[^>]*data-testid="copy-image"[^>]*disabled/);
     expect(page).toContain("picker.disabled = busy || picker.options.length === 0");
     expect(page).toContain("button.disabled = busy || !detail");
+  });
+
+  it("keeps selection controls out of the tab order while no conversation is loaded", () => {
+    expect(page).toContain('<button type="button" id="all" disabled>Select all</button>');
+    expect(page).toContain('<button type="button" id="none" disabled>Clear</button>');
+    expect(page).toContain("function setSelectionControlsDisabled(disabled)");
+    expect(page).toContain('for (const id of ["all", "none"])');
+    expect(page).toContain("control.disabled = disabled");
+    expect(page).toContain("setSelectionControlsDisabled(busy || !detail)");
+    expect(page).toContain("setSelectionControlsDisabled(visible || !detail)");
+    expect(page).toContain('$("all").onclick = () => { if (!detail) return;');
+    expect(page).toContain('$("none").onclick = () => { if (!detail) return;');
+    expect(page).toContain('body[data-surface="desktop"] footer button:disabled');
+  });
+
+  it("uses conversation terminology throughout desktop-only visible copy", () => {
+    expect(page).toContain(">Conversation list</span>");
+    const manual = page.slice(page.indexOf("async function refreshCurrentSession"), page.indexOf('$("refresh").onclick'));
+    const load = page.slice(page.indexOf("async function loadSession("), page.indexOf("function renderList"));
+    expect(manual).toContain('"share.desktop.conversationRefreshed"');
+    expect(manual).toContain('"share.desktop.refreshListFailed"');
+    expect(load).toContain('"share.desktop.loadFailed"');
+    expect(page).not.toContain(">Session list</span>");
   });
 
   it("leaves the default browser renderer byte-identical to explicit browser mode", () => {
