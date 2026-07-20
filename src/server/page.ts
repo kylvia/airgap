@@ -9,6 +9,8 @@ export function serializeForScript(value: unknown): string {
     .replace(/\u2029/g, "\\u2029");
 }
 
+export type ShareSurface = "browser" | "desktop";
+
 /**
  * 交互页：左勾选、右实时预览（隔离在 iframe 里，聊天 CSS 不污染 app 外壳）、
  * 底部发送按钮。所有会话数据经 /api 拉取，页面零外链。
@@ -22,13 +24,33 @@ export function renderPage(
   isMac = true,
   locale: Locale = "zh-CN",
   languagePreference: LanguagePreference = locale,
+  surface: ShareSurface = "browser",
+  appVersion?: string,
 ): string {
+  const isDesktop = surface === "desktop";
   const i18n = createI18n(locale);
   const t = (key: string, params?: Record<string, string | number>): string => i18n.t(key, params);
   const hiddenStatusKey = isMac ? "share.page.status.other" : "share.page.status.mac";
+  const desktopOmittedMessages = new Set([
+    "share.page.clipboardHint",
+    "share.page.closed",
+    "share.page.copied",
+    "share.page.copyResume",
+    "share.page.done",
+    "share.page.listSaved",
+    "share.page.loadClosed",
+    "share.page.settings",
+    "share.page.status.mac",
+    "share.page.status.other",
+  ]);
   const messages = Object.fromEntries(
     i18n.keys()
-      .filter((key) => (key.startsWith("share.page.") || key.startsWith("share.turnCount")) && key !== hiddenStatusKey)
+      .filter((key) => (
+        key.startsWith("share.page.") ||
+        key.startsWith("share.turnCount") ||
+        (isDesktop && key.startsWith("share.desktop."))
+      ) && key !== hiddenStatusKey)
+      .filter((key) => !isDesktop || !desktopOmittedMessages.has(key))
       .map((key) => [key, i18n.t(key)]),
   );
   const chatCss = JSON.stringify(CHAT_CSS);
@@ -49,12 +71,119 @@ export function renderPage(
       return `<option value="${value}"${value === languagePreference ? " selected" : ""}>${escapeHtml(t(`share.page.language.${key}`))}</option>`;
     })
     .join("");
+  const sidCss = isDesktop ? "" : `
+  /* 当前会话 id 胶囊：点击复制 resume 命令 */
+  header #sid { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted);
+    border: 1px solid var(--border); border-radius: var(--radius-tag); padding: 3px 10px;
+    cursor: pointer; user-select: none; white-space: nowrap;
+    transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+  header #sid:hover { color: var(--fg); border-color: var(--border-strong); }`;
+  const desktopCss = isDesktop ? `
+  body[data-surface="desktop"] header { padding: 15px 22px; }
+  body[data-surface="desktop"] header select { min-width: 260px; max-width: min(42vw, 440px); }
+  body[data-surface="desktop"] #prefpanel { width: 310px; padding: 8px 16px 12px; }
+  body[data-surface="desktop"] #prefpanel h2 { font-family: var(--font-serif); font-size: 18px; font-weight: 600; letter-spacing: -0.02em; padding: 8px 0; }
+  body[data-surface="desktop"] #prefpanel details { border-top: 1px solid var(--border-subtle); padding: 10px 0 2px; }
+  body[data-surface="desktop"] #prefpanel summary { cursor: pointer; font-size: 13px; font-weight: 500; }
+  body[data-surface="desktop"] #prefpanel .about { border-top: 1px solid var(--border-subtle); margin-top: 10px; padding-top: 10px; }
+  body[data-surface="desktop"] #prefpanel .about p { color: var(--fg-muted); font-size: 12px; line-height: 1.6; }
+  body[data-surface="desktop"] #prefpanel .about a { color: var(--fg); text-underline-offset: 3px; }
+  body[data-surface="desktop"] .empty-state { position: absolute; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center; background: var(--bg-subtle); padding: 32px; }
+  body[data-surface="desktop"] .empty-state[hidden] { display: none; }
+  body[data-surface="desktop"] .empty-card { width: min(520px, 100%); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 30px; }
+  body[data-surface="desktop"] .empty-card h2 { font-family: var(--font-serif); font-size: 25px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 10px; }
+  body[data-surface="desktop"] .empty-card p { color: var(--fg-muted); font-size: 14px; line-height: 1.65; margin-top: 7px; }
+  body[data-surface="desktop"] .empty-card button { margin-top: 18px; height: 36px; padding: 0 18px; border: 1px solid var(--btn-primary-bg); border-radius: var(--radius-button); background: var(--btn-primary-bg); color: var(--btn-primary-fg); font: 500 13px var(--font-sans); cursor: pointer; }
+  body[data-surface="desktop"] .empty-card a { display: inline-block; margin: 12px 0 0 12px; color: var(--fg); font-size: 13px; text-underline-offset: 3px; }
+  body[data-surface="desktop"] .row .roles { display: block; color: var(--fg-subtle); font-size: 11px; margin-bottom: 3px; }
+  body[data-surface="desktop"] footer .rdct-copy { display: flex; flex-direction: column; gap: 2px; }
+  body[data-surface="desktop"] footer .rdct-copy small { color: var(--fg-subtle); font-size: 11px; }
+  body[data-surface="desktop"] footer .status { min-width: 180px; }` : "";
+  const testId = (name: string): string => isDesktop ? ` data-testid="${name}"` : "";
+  const sidMarkup = isDesktop
+    ? ""
+    : `<span id="sid" style="display:none" title="${escapeHtml(t("share.page.copyResume"))}"></span>`;
+  const settingsMarkup = isDesktop
+    ? `<div id="prefpanel" hidden>
+      <h2>${escapeHtml(t("share.desktop.settings"))}</h2>
+      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>
+      <details><summary>${escapeHtml(t("share.desktop.advanced"))}</summary>
+        <div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit">
+          <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
+          <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
+          <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
+        </select></div>
+        <div class="prow"><span>${escapeHtml(t("share.page.toolDisplay"))}</span><select id="tools">${toolsOptions}</select></div>
+      </details>
+      <section class="about" aria-label="${escapeHtml(t("share.desktop.about"))}">
+        <h2>${escapeHtml(t("share.desktop.about"))}</h2>
+        ${appVersion ? `<p>${escapeHtml(t("share.desktop.version", { version: appVersion }))}</p>` : ""}
+        <p><a href="https://github.com/kylvia/airgap" target="_blank" rel="noreferrer">${escapeHtml(t("share.desktop.repository"))}</a></p>
+        <p><a href="https://github.com/kylvia/airgap/releases" target="_blank" rel="noreferrer">${escapeHtml(t("share.desktop.downloadPage"))}</a></p>
+      </section>
+    </div>`
+    : `<div id="prefpanel" hidden>
+      <div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit">
+        <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
+        <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
+        <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
+      </select></div>
+      <div class="prow"><span>${escapeHtml(t("share.page.toolDisplay"))}</span><select id="tools">${toolsOptions}</select></div>
+      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>
+    </div>`;
+  const emptyStateMarkup = isDesktop
+    ? `<section class="empty-state" id="empty-state" data-testid="empty-state" hidden>
+      <div class="empty-card">
+        <h2 id="empty-title">${escapeHtml(t("share.desktop.emptyTitle"))}</h2>
+        <p id="empty-body">${escapeHtml(t("share.desktop.emptyBody"))}</p>
+        <p>${escapeHtml(t("share.desktop.localOnly"))}</p>
+        <button id="empty-recheck">${escapeHtml(t("share.desktop.recheck"))}</button>
+        <a id="permission-help" href="https://github.com/kylvia/airgap" target="_blank" rel="noreferrer" hidden>${escapeHtml(t("share.desktop.permissionHelp"))}</a>
+      </div>
+    </section>`
+    : "";
+  const footerMarkup = isDesktop
+    ? `<footer>
+    <label class="rdct" title="${escapeHtml(t("share.desktop.redactionHint"))}"><input type="checkbox" id="redact" data-testid="redaction-toggle" checked><span class="rdct-copy"><span>${escapeHtml(t("share.desktop.redaction"))}</span><small>${escapeHtml(t("share.desktop.redactionHint"))}</small></span></label>
+    <button data-a="clipboard" data-f="md" data-testid="copy-text">${escapeHtml(t("share.desktop.copyText"))}</button>
+    <button data-a="save" data-f="png" data-testid="save-image">${escapeHtml(t("share.desktop.saveImage"))}</button>
+    <span class="status err" id="image-failure-copy" hidden>${escapeHtml(t("share.desktop.imageFailed"))}</span>
+    <span class="status" id="status">${escapeHtml(t("share.desktop.ready"))}</span>
+    <button class="primary" data-a="clipboard" data-f="png" data-testid="copy-image">${escapeHtml(t("share.desktop.copyImage"))}</button>
+  </footer>`
+    : `<footer>
+    <label class="rdct" title="${escapeHtml(t("share.page.redactHint"))}"><input type="checkbox" id="redact" checked>${escapeHtml(t("share.page.redact"))}</label>
+    <button${primaryCls(isMac)} data-a="clipboard" data-f="png"${clipboardHint}>${escapeHtml(t("share.page.copyImage"))}</button>
+    <button${primaryCls(!isMac)} data-a="download" data-f="png">${escapeHtml(t("share.page.downloadPng"))}</button>
+    <button data-a="clipboard" data-f="md"${clipboardHint}>${escapeHtml(t("share.page.copyMarkdown"))}</button>
+    <button data-a="save" data-f="png">${escapeHtml(t("share.page.saveDesktop"))}</button>
+    <span class="status" id="status">${escapeHtml(statusHint)}</span>
+    <button id="done">${escapeHtml(t("share.page.done"))}</button>
+  </footer>`;
+  const sidScript = isDesktop ? "" : `
+    // 会话 id 胶囊：显示前 8 位，点击复制完整 resume 命令。
+    // 不回到原 workspace 的 resume 只有对话没有文件语境，基本没意义——cwd 已知就拼上 cd。
+    const sid = $("sid");
+    sid.textContent = detail.id.slice(0, 8);
+    sid.style.display = "";
+    sid.onclick = async () => {
+      const resume = (detail.source === "codex" ? "codex resume " : "claude --resume ") + detail.id;
+      const cmd = detail.cwd ? 'cd "' + detail.cwd + '" && ' + resume : resume;
+      try { await navigator.clipboard.writeText(cmd); setStatus(msg("share.page.copied", { command: cmd })); }
+      catch { setStatus(cmd); } // 剪贴板不可用就把命令亮在状态栏，手动抄
+    };`;
+  const doneScript = isDesktop
+    ? ""
+    : `$("done").onclick = async () => { await fetch("/api/close", { method: "POST" }); setStatus(msg("share.page.closed")); };`;
+  const listConfigComment = isDesktop
+    ? "// Change the conversation limit in the shared Airgap settings."
+    : "// 页面上改条数 = 写回 ~/.airgap/config.json（与配置文件同一真源），成功后按新条数重拉列表。";
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtml(t("share.page.title"))}</title>
+<title>${escapeHtml(t(isDesktop ? "share.desktop.title" : "share.page.title"))}</title>
 <style>
 ${THEME_CSS}
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -77,12 +206,7 @@ ${THEME_CSS}
   header #refresh:hover { border-color: var(--border-strong); background: var(--bg-hover); }
   header #refresh:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   header #refresh:disabled { cursor: wait; opacity: 0.48; }
-  /* 当前会话 id 胶囊：点击复制 resume 命令 */
-  header #sid { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted);
-    border: 1px solid var(--border); border-radius: var(--radius-tag); padding: 3px 10px;
-    cursor: pointer; user-select: none; white-space: nowrap;
-    transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
-  header #sid:hover { color: var(--fg); border-color: var(--border-strong); }
+${sidCss}
   /* 设置入口 + popover：实色 paper 面板（铁律禁半透明材质），hairline 边框方角卡片 */
   header #prefs { margin-left: auto; width: 34px; height: 34px; flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
@@ -147,52 +271,39 @@ ${THEME_CSS}
   footer .status { flex: 1; font-size: 13px; color: var(--fg-muted); min-width: 200px; }
   footer .status.err { color: var(--danger); }
   .sbanner { background: var(--warning-bg); color: var(--warning-fg); font-size: 12.5px; padding: 8px 18px; border-bottom: 1px solid var(--warning); display: none; align-items: center; gap: 7px; }
+${desktopCss}
 </style>
 </head>
-<body>
+<body${isDesktop ? ' data-surface="desktop"' : ""}>
   <header>
     <span class="logo">${airgapMark(20)}<span>airgap</span></span>
-    <span style="font-size:13px;color:var(--fg-muted)">${escapeHtml(t("share.page.subtitle"))}</span>
-    <select id="sess"></select>
-    <button id="refresh" title="${escapeHtml(t("share.page.refresh"))}" aria-label="${escapeHtml(t("share.page.refresh"))}">${refreshMark}</button>
-    <span id="sid" style="display:none" title="${escapeHtml(t("share.page.copyResume"))}"></span>
-    <button id="prefs" title="${escapeHtml(t("share.page.settings"))}" aria-label="${escapeHtml(t("share.page.settingsAria"))}">${prefsMark}</button>
-    <div id="prefpanel" hidden>
-      <div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit">
-        <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
-        <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
-        <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
-      </select></div>
-      <div class="prow"><span>${escapeHtml(t("share.page.toolDisplay"))}</span><select id="tools">${toolsOptions}</select></div>
-      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>
-    </div>
+    <span style="font-size:13px;color:var(--fg-muted)">${escapeHtml(t(isDesktop ? "share.desktop.title" : "share.page.subtitle"))}</span>
+    <select id="sess"${testId("conversation-picker")}></select>
+    <button id="refresh"${testId("refresh")} title="${escapeHtml(t(isDesktop ? "share.desktop.recheck" : "share.page.refresh"))}" aria-label="${escapeHtml(t(isDesktop ? "share.desktop.recheck" : "share.page.refresh"))}">${refreshMark}</button>
+    ${sidMarkup}
+    <button id="prefs"${testId("settings")} title="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settings"))}" aria-label="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settingsAria"))}">${prefsMark}</button>
+    ${settingsMarkup}
   </header>
   <div class="sbanner" id="sbanner"></div>
   <main>
     <div class="loading" id="loading">${airgapMark(26)}<span>${escapeHtml(t("share.page.loadingContent"))}</span></div>
+    ${emptyStateMarkup}
     <div class="left">
       <div class="bar">
         <a id="all">${escapeHtml(t("share.page.selectAll"))}</a><a id="none">${escapeHtml(t("share.page.clear"))}</a>
         <span id="count" style="margin-left:auto"></span>
       </div>
-      <div class="list" id="list"></div>
+      <div class="list" id="list"${testId("turn-list")}></div>
     </div>
-    <div class="right"><iframe id="preview"></iframe></div>
+    <div class="right"><iframe id="preview"${testId("preview")}></iframe></div>
   </main>
-  <footer>
-    <label class="rdct" title="${escapeHtml(t("share.page.redactHint"))}"><input type="checkbox" id="redact" checked>${escapeHtml(t("share.page.redact"))}</label>
-    <button${primaryCls(isMac)} data-a="clipboard" data-f="png"${clipboardHint}>${escapeHtml(t("share.page.copyImage"))}</button>
-    <button${primaryCls(!isMac)} data-a="download" data-f="png">${escapeHtml(t("share.page.downloadPng"))}</button>
-    <button data-a="clipboard" data-f="md"${clipboardHint}>${escapeHtml(t("share.page.copyMarkdown"))}</button>
-    <button data-a="save" data-f="png">${escapeHtml(t("share.page.saveDesktop"))}</button>
-    <span class="status" id="status">${escapeHtml(statusHint)}</span>
-    <button id="done">${escapeHtml(t("share.page.done"))}</button>
-  </footer>
+  ${footerMarkup}
 <script>
 const CHAT_CSS = ${chatCss};
 const DEFAULT = ${def};
 const LOCALE = ${JSON.stringify(locale)};
 const LANGUAGE_PREFERENCE = ${JSON.stringify(languagePreference)};
+const SURFACE = ${JSON.stringify(surface)};
 const M = ${serializeForScript(messages)};
 function msg(key, params = {}) {
   const singularKey = params.count === 1 ? key + ".one" : "";
@@ -209,13 +320,17 @@ let pvReady = false;          // 预览 iframe 是否已加载好
 const $ = (id) => document.getElementById(id);
 function setStatus(msg, err) { const s = $("status"); s.textContent = msg; s.className = "status" + (err ? " err" : ""); }
 
+function providerName(source) { return source === "claude" ? "Claude Code" : "Codex"; }
+
 function fillOptions(sessions, keep) {
   const sel = $("sess"); sel.innerHTML = "";
   for (const s of sessions) {
     const o = document.createElement("option");
     o.value = s.id;
-    // 标题优先（区分度最高）；无标题（codex / 未生成）回退项目名。id 前缀对 UI 没有区分价值，不再展示。
-    o.textContent = (s.title || s.project + " · " + msg("share.page.fallbackTitle")) + " · " + s.source + " · " + rel(s.mtimeMs);
+    // 桌面用户只看到项目、产品和相对时间；内部 id 仍只作为 option value 使用。
+    o.textContent = SURFACE === "desktop"
+      ? msg("share.desktop.conversationLabel", { project: s.project, provider: providerName(s.source), time: rel(s.mtimeMs) })
+      : (s.title || s.project + " · " + msg("share.page.fallbackTitle")) + " · " + s.source + " · " + rel(s.mtimeMs);
     sel.appendChild(o);
   }
   if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
@@ -233,13 +348,56 @@ function syncLimitSelect(limit) {
 }
 
 async function loadSessions() {
-  const r = await fetch("/api/sessions"); const { sessions, limit } = await r.json();
-  fillOptions(sessions, null);
-  syncLimitSelect(limit);
-  const sel = $("sess");
-  const pick = sessions.find((s) => s.id.startsWith(DEFAULT)) || sessions[0];
-  if (pick) { sel.value = pick.id; await loadSession(pick.id); }
-  sel.onchange = () => loadSession(sel.value);
+  try {
+    const r = await fetch("/api/sessions");
+    if (!r.ok) throw new Error("sessions request failed");
+    const { sessions, limit, issues = [] } = await r.json();
+    fillOptions(sessions, null);
+    syncLimitSelect(limit);
+    showDiscoveryState(sessions, issues);
+    const sel = $("sess");
+    const pick = sessions.find((s) => s.id.startsWith(DEFAULT)) || sessions[0];
+    if (pick) { sel.value = pick.id; await loadSession(pick.id); }
+    sel.onchange = () => loadSession(sel.value);
+  } catch (error) {
+    if (SURFACE === "desktop") showStartupError();
+    else throw error;
+  }
+}
+
+function showDiscoveryState(sessions, issues) {
+  if (SURFACE !== "desktop") return;
+  const state = $("empty-state");
+  const title = $("empty-title");
+  const body = $("empty-body");
+  const help = $("permission-help");
+  const issue = issues[0];
+  if (issue) {
+    const message = msg("share.desktop.permissionError", { provider: issue.provider || providerName(issue.source), path: issue.path });
+    if (sessions.length > 0) {
+      state.hidden = true;
+      setStatus(message, true);
+    } else {
+      state.hidden = false;
+      title.textContent = issue.provider || providerName(issue.source);
+      body.textContent = message;
+      help.hidden = false;
+    }
+    return;
+  }
+  help.hidden = true;
+  title.textContent = msg("share.desktop.emptyTitle");
+  body.textContent = msg("share.desktop.emptyBody");
+  state.hidden = sessions.length > 0;
+}
+
+function showStartupError() {
+  if (SURFACE !== "desktop") return;
+  const state = $("empty-state");
+  state.hidden = false;
+  $("empty-title").textContent = msg("share.desktop.startupError");
+  $("empty-body").textContent = msg("share.desktop.localOnly");
+  $("permission-help").hidden = true;
 }
 
 // ai-title 会随会话演进被 Claude 持续更新——窗口重获焦点时（从 Claude Code 切回来的瞬间）
@@ -252,6 +410,7 @@ async function refreshSessions() {
   const data = await r.json();
   fillOptions(data.sessions, detail ? detail.id : null);
   syncLimitSelect(data.limit);
+  showDiscoveryState(data.sessions, data.issues || []);
   return true;
 }
 let manualRefreshInFlight = false;
@@ -267,6 +426,10 @@ async function refreshCurrentSession() {
       return;
     }
     if (!detail) {
+      if (SURFACE === "desktop" && $("sess").value) {
+        await loadSession($("sess").value);
+        return;
+      }
       setStatus(msg("share.page.listRefreshed"));
       return;
     }
@@ -280,13 +443,16 @@ async function refreshCurrentSession() {
   }
 }
 $("refresh").onclick = () => { refreshCurrentSession(); };
-// 页面上改条数 = 写回 ~/.airgap/config.json（与配置文件同一真源），成功后按新条数重拉列表。
+$("empty-recheck") && ($("empty-recheck").onclick = () => { refreshCurrentSession(); });
+${listConfigComment}
 $("limit").onchange = async () => {
   const n = Number($("limit").value);
   const r = await fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionListLimit: n }) });
   const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.saveFailed") }));
   if (!res.ok) { setStatus(res.message || msg("share.page.saveFailed"), true); return; }
-  setStatus(msg("share.page.listSaved", { count: res.limit }));
+  setStatus(SURFACE === "desktop"
+    ? msg("share.page.listRefreshed")
+    : msg("share.page.listSaved", { count: res.limit }));
   await refreshSessions();
 };
 window.addEventListener("focus", () => {
@@ -321,23 +487,13 @@ async function loadSession(id, keepSelection, refreshedStatus) {
       for (const index of selected) if (!available.has(index)) selected.delete(index);
     }
     renderList(); buildPreviewShell();
-    // 会话 id 胶囊：显示前 8 位，点击复制完整 resume 命令。
-    // 不回到原 workspace 的 resume 只有对话没有文件语境，基本没意义——cwd 已知就拼上 cd。
-    const sid = $("sid");
-    sid.textContent = detail.id.slice(0, 8);
-    sid.style.display = "";
-    sid.onclick = async () => {
-      const resume = (detail.source === "codex" ? "codex resume " : "claude --resume ") + detail.id;
-      const cmd = detail.cwd ? 'cd "' + detail.cwd + '" && ' + resume : resume;
-      try { await navigator.clipboard.writeText(cmd); setStatus(msg("share.page.copied", { command: cmd })); }
-      catch { setStatus(cmd); } // 剪贴板不可用就把命令亮在状态栏，手动抄
-    };
+${sidScript}
     setStatus(keepSelection
       ? refreshedStatus || msg("share.page.toolRefreshed")
       : msg("share.page.loadedSummary", { turns: detail.turns.length, selected: selected.size }));
     return true;
   } catch {
-    setStatus(msg("share.page.loadClosed"), true);
+    setStatus(msg(SURFACE === "desktop" ? "share.desktop.startupError" : "share.page.loadClosed"), true);
     return false;
   } finally {
     setLoading(false);
@@ -360,7 +516,10 @@ function renderList() {
     };
     const body = document.createElement("div"); body.className = "body";
     const top = document.createElement("div"); top.className = "top";
-    top.innerHTML = '<span class="idx">' + msg("share.page.turnLabel", { index: t.index }) + '</span><span class="prev"></span>'
+    const roles = SURFACE === "desktop"
+      ? '<span class="roles">' + [msg("share.desktop.role.me"), t.html.includes('class="msg-ai"') ? msg("share.desktop.role.assistant") : "", t.html.includes('class="tool') ? msg("share.desktop.role.tool") : ""].filter(Boolean).join(" · ") + '</span>'
+      : "";
+    top.innerHTML = roles + '<span class="idx">' + msg("share.page.turnLabel", { index: t.index }) + '</span><span class="prev"></span>'
       + (t.tag ? '<span class="tag">' + t.tag + '</span>' : '')
       + (t.findings > 0 ? '<span class="warn">' + WARN_MARK + msg("share.page.findingCount", { count: t.findings }) + '</span>' : '');
     top.querySelector(".prev").textContent = t.preview;
@@ -485,7 +644,7 @@ $("language").onchange = async () => {
     select.disabled = false;
   }
 };
-$("done").onclick = async () => { await fetch("/api/close", { method: "POST" }); setStatus(msg("share.page.closed")); };
+${doneScript}
 
 loadSessions();
 </script>

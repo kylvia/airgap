@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -22,10 +23,44 @@ export function codexSessionsDir(home: string): string {
   return join(home, ".codex", "sessions");
 }
 
-async function safeReaddir(dir: string) {
+export interface DiscoveryIssue {
+  source: "claude" | "codex";
+  provider: "Claude Code" | "Codex";
+  path: string;
+  code: "EACCES" | "EPERM";
+}
+
+export interface DetailedDiscoveryResult {
+  sessions: SessionInfo[];
+  issues: DiscoveryIssue[];
+}
+
+export interface DiscoveryDependencies {
+  readDirectory?: (dir: string) => Promise<Dirent[]>;
+}
+
+interface DiscoveryContext {
+  readDirectory: (dir: string) => Promise<Dirent[]>;
+  issues: DiscoveryIssue[];
+}
+
+async function safeReaddir(
+  dir: string,
+  source: DiscoveryIssue["source"],
+  context: DiscoveryContext,
+): Promise<Dirent[]> {
   try {
-    return await readdir(dir, { withFileTypes: true });
-  } catch {
+    return await context.readDirectory(dir);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EACCES" || code === "EPERM") {
+      context.issues.push({
+        source,
+        provider: source === "claude" ? "Claude Code" : "Codex",
+        path: dir,
+        code,
+      });
+    }
     return [];
   }
 }
@@ -55,11 +90,11 @@ async function peekCwd(file: string, maxLines: number): Promise<string | null> {
   return null;
 }
 
-async function collectSidecars(projDir: string, sid: string): Promise<SidecarFiles> {
+async function collectSidecars(projDir: string, sid: string, context: DiscoveryContext): Promise<SidecarFiles> {
   const base = join(projDir, sid);
   const subagents: string[] = [];
   const subagentsDir = join(base, "subagents");
-  for (const e of await safeReaddir(subagentsDir)) {
+  for (const e of await safeReaddir(subagentsDir, "claude", context)) {
     if (!e.isFile()) continue;
     if (!e.name.startsWith("agent-")) continue;
     if (e.name.endsWith(".jsonl") || e.name.endsWith(".meta.json")) {
@@ -68,7 +103,7 @@ async function collectSidecars(projDir: string, sid: string): Promise<SidecarFil
   }
   const toolResults: string[] = [];
   const toolResultsDir = join(base, "tool-results");
-  for (const e of await safeReaddir(toolResultsDir)) {
+  for (const e of await safeReaddir(toolResultsDir, "claude", context)) {
     if (e.isFile() && e.name.endsWith(".txt")) toolResults.push(join(toolResultsDir, e.name));
   }
   subagents.sort();
@@ -76,13 +111,13 @@ async function collectSidecars(projDir: string, sid: string): Promise<SidecarFil
   return { subagents, toolResults };
 }
 
-async function discoverClaude(home: string): Promise<SessionInfo[]> {
+async function discoverClaude(home: string, context: DiscoveryContext): Promise<SessionInfo[]> {
   const root = claudeProjectsDir(home);
   const out: SessionInfo[] = [];
-  for (const projEntry of await safeReaddir(root)) {
+  for (const projEntry of await safeReaddir(root, "claude", context)) {
     if (!projEntry.isDirectory()) continue;
     const projDir = join(root, projEntry.name);
-    for (const e of await safeReaddir(projDir)) {
+    for (const e of await safeReaddir(projDir, "claude", context)) {
       if (!e.isFile() || !e.name.endsWith(".jsonl")) continue;
       const file = join(projDir, e.name);
       let st;
@@ -101,7 +136,7 @@ async function discoverClaude(home: string): Promise<SessionInfo[]> {
         project: cwd ?? projEntry.name,
         mtimeMs: st.mtimeMs,
         sizeBytes: st.size,
-        sidecars: await collectSidecars(projDir, id),
+        sidecars: await collectSidecars(projDir, id, context),
       });
     }
   }
@@ -110,13 +145,13 @@ async function discoverClaude(home: string): Promise<SessionInfo[]> {
 
 const ROLLOUT_UUID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 
-async function discoverCodex(home: string): Promise<SessionInfo[]> {
+async function discoverCodex(home: string, context: DiscoveryContext): Promise<SessionInfo[]> {
   const root = codexSessionsDir(home);
   const out: SessionInfo[] = [];
   const stack: string[] = [root];
   while (stack.length > 0) {
     const dir = stack.pop()!;
-    for (const e of await safeReaddir(dir)) {
+    for (const e of await safeReaddir(dir, "codex", context)) {
       const p = join(dir, e.name);
       if (e.isDirectory()) {
         stack.push(p);
@@ -146,17 +181,30 @@ async function discoverCodex(home: string): Promise<SessionInfo[]> {
   return out;
 }
 
-/** Discover sessions from both local stores, newest first. Missing dirs are fine. */
-export async function discoverSessions(opts: DiscoverOptions): Promise<SessionInfo[]> {
+/** Discover sessions plus typed, non-fatal store access issues for desktop diagnostics. */
+export async function discoverSessionsDetailed(
+  opts: DiscoverOptions,
+  dependencies: DiscoveryDependencies = {},
+): Promise<DetailedDiscoveryResult> {
   const home = opts.home ?? homedir();
   const sources = opts.sources ?? ["claude", "codex"];
+  const issues: DiscoveryIssue[] = [];
+  const context: DiscoveryContext = {
+    readDirectory: dependencies.readDirectory ?? ((dir) => readdir(dir, { withFileTypes: true })),
+    issues,
+  };
   const out: SessionInfo[] = [];
-  if (sources.includes("claude")) out.push(...(await discoverClaude(home)));
-  if (sources.includes("codex")) out.push(...(await discoverCodex(home)));
+  if (sources.includes("claude")) out.push(...(await discoverClaude(home, context)));
+  if (sources.includes("codex")) out.push(...(await discoverCodex(home, context)));
   const needle = opts.project;
   const filtered = needle
     ? out.filter((s) => s.project.includes(needle) || (s.cwd ?? "").includes(needle))
     : out;
   filtered.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return filtered;
+  return { sessions: filtered, issues };
+}
+
+/** Discover sessions from both local stores, newest first. Missing and unreadable dirs stay fail-soft. */
+export async function discoverSessions(opts: DiscoverOptions): Promise<SessionInfo[]> {
+  return (await discoverSessionsDetailed(opts)).sessions;
 }

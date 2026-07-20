@@ -134,6 +134,82 @@ describe("renderPage (share picker shell)", () => {
   });
 });
 
+describe("renderPage desktop surface", () => {
+  const page = renderPage(undefined, "summary", true, "en", "en", "desktop", "0.3.0");
+
+  it("renders the approved single-window Share controls with stable test anchors", () => {
+    expect(page).toContain('data-surface="desktop"');
+    for (const testId of [
+      "conversation-picker",
+      "refresh",
+      "turn-list",
+      "preview",
+      "redaction-toggle",
+      "copy-text",
+      "save-image",
+      "copy-image",
+      "settings",
+      "empty-state",
+    ]) {
+      expect(page).toContain(`data-testid="${testId}"`);
+    }
+    expect(page).toContain("Share conversation");
+    expect(page).toContain("Automatically hide possible secrets");
+    expect(page).toContain(">Copy text</button>");
+    expect(page).toContain(">Save image</button>");
+    expect(page).toMatch(/<button class="primary"[^>]*data-testid="copy-image"[^>]*>Copy image<\/button>/);
+  });
+
+  it("keeps browser-only implementation details out of desktop markup", () => {
+    expect(page).not.toContain('id="sid"');
+    expect(page).not.toContain('id="done"');
+    expect(page).not.toContain("claude --resume");
+    expect(page).not.toContain("codex resume");
+    expect(page).not.toContain("~/.airgap/config.json");
+    expect(page).not.toContain(">Done</button>");
+  });
+
+  it("uses friendly provider labels and keeps tool controls under Advanced", () => {
+    expect(page).toContain('source === "claude" ? "Claude Code" : "Codex"');
+    expect(page).toContain('msg("share.desktop.conversationLabel", { project: s.project, provider: providerName(s.source), time: rel(s.mtimeMs) })');
+    expect(page).toMatch(/<details[^>]*>[\s\S]*<summary>Advanced<\/summary>[\s\S]*id="tools"[\s\S]*<\/details>/);
+    expect(page).toContain('msg("share.desktop.role.me")');
+    expect(page).toContain('msg("share.desktop.role.assistant")');
+    expect(page).toContain('msg("share.desktop.role.tool")');
+  });
+
+  it("renders nontechnical empty, permission, image failure, and About copy", () => {
+    expect(page).toContain("Airgap looks for Claude Code and Codex conversations on this Mac");
+    expect(page).toContain("Airgap does not upload your conversations and does not require an account");
+    expect(page).toContain('msg("share.desktop.permissionError"');
+    expect(page).toContain("Image export failed. Your selection is unchanged, and you can still copy text.");
+    expect(page).toContain("0.3.0");
+    expect(page).toContain('href="https://github.com/kylvia/airgap"');
+    expect(page).toContain('href="https://github.com/kylvia/airgap/releases"');
+  });
+
+  it("preserves the shared state machine and current selection across refresh/export failures", () => {
+    expect(page).toContain("if (!r.ok) return false");
+    expect(page).toContain("const selected = new Set()");
+    const refresh = page.slice(page.indexOf("async function refreshSessions"), page.indexOf("let manualRefreshInFlight"));
+    expect(refresh.indexOf("fillOptions")).toBeGreaterThan(refresh.indexOf("if (!r.ok) return false"));
+    const exportHandler = page.slice(page.indexOf("async function doExport"), page.indexOf("for (const btn"));
+    expect(exportHandler).not.toContain("selected.clear()");
+  });
+
+  it("loads the first conversation when Recheck finds conversations after an empty start", () => {
+    expect(page).toContain('if (SURFACE === "desktop" && $("sess").value)');
+    expect(page).toContain('await loadSession($("sess").value)');
+  });
+
+  it("leaves the default browser renderer byte-identical to explicit browser mode", () => {
+    expect(renderPage()).toBe(renderPage(undefined, "summary", true, "zh-CN", "zh-CN", "browser", "9.9.9"));
+    expect(renderPage()).toContain('id="done"');
+    expect(renderPage()).toContain("claude --resume");
+    expect(renderPage()).not.toContain("9.9.9");
+  });
+});
+
 describe("renderPage internationalization", () => {
   it("renders an English picker with matching document and browser locale", () => {
     const page = renderPage(undefined, "summary", true, "en");
@@ -180,6 +256,18 @@ describe("renderPage internationalization", () => {
 });
 
 describe("Share server locale wiring", () => {
+  it("passes desktop surface and app version into the shared renderer", async () => {
+    const server = await startShareServer({ surface: "desktop", appVersion: "0.3.0", idleTimeoutMs: null });
+    try {
+      const page = await fetch(server.url).then((response) => response.text());
+      expect(page).toContain('data-surface="desktop"');
+      expect(page).toContain("0.3.0");
+      expect(page).not.toContain('id="done"');
+    } finally {
+      await server.close();
+    }
+  });
+
   it("serves the resolved locale and stable localized API errors", async () => {
     const server = await startShareServer({ locale: "en" });
     try {

@@ -1,7 +1,15 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { claudeProjectsDir, codexSessionsDir, discoverSessions, mungeCwd } from "../src/discovery.js";
+import type { Dirent } from "node:fs";
+import { readdir } from "node:fs/promises";
+import {
+  claudeProjectsDir,
+  codexSessionsDir,
+  discoverSessions,
+  discoverSessionsDetailed,
+  mungeCwd,
+} from "../src/discovery.js";
 
 const HOME = fileURLToPath(new URL("./fixtures/home", import.meta.url));
 
@@ -80,5 +88,27 @@ describe("discoverSessions", () => {
 
   it("tolerates a home without any session stores", async () => {
     expect(await discoverSessions({ home: join(HOME, "definitely-missing") })).toEqual([]);
+  });
+
+  it("reports typed provider and path issues without changing the legacy result", async () => {
+    const claudePath = claudeProjectsDir(HOME);
+    const readDirectory = async (dir: string): Promise<Dirent[]> => {
+      if (dir === claudePath) {
+        throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+      }
+      return readdir(dir, { withFileTypes: true });
+    };
+
+    const detailed = await discoverSessionsDetailed({ home: HOME }, { readDirectory });
+    expect(detailed.sessions).toHaveLength(1);
+    expect(detailed.issues).toEqual([
+      { source: "claude", provider: "Claude Code", path: claudePath, code: "EACCES" },
+    ]);
+    await expect(discoverSessions({ home: HOME })).resolves.toHaveLength(4);
+  });
+
+  it("treats missing stores as empty rather than diagnostic failures", async () => {
+    const detailed = await discoverSessionsDetailed({ home: join(HOME, "definitely-missing") });
+    expect(detailed).toEqual({ sessions: [], issues: [] });
   });
 });

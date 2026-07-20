@@ -7,14 +7,18 @@ import path from "node:path";
 import type { RuleMatch, SessionInfo, ToolDisplay, Turn } from "../types.js";
 import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "../types.js";
 import { loadConfig, sessionListLimit, shareToolDisplay, updateConfig, type ConfigPatch } from "../config.js";
-import { discoverSessions } from "../discovery.js";
+import {
+  discoverSessions,
+  discoverSessionsDetailed,
+  type DiscoveryIssue,
+} from "../discovery.js";
 import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
 import { renderHtml, renderTurnBlock } from "../render/html.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
 import { oneLine, peekTitle, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../session.js";
-import { renderPage } from "./page.js";
+import { renderPage, type ShareSurface } from "./page.js";
 import {
   LANGUAGE_PREFERENCES,
   createI18n,
@@ -121,8 +125,15 @@ export function shareTurnsForDisplay(turns: Turn[], tools: ToolDisplay): Turn[] 
 // ---------- 会话读取 ----------
 
 /** 下拉只放最近 limit 个（config: share.sessionListLimit，常用 10/20/50）；更早的用 `airgap share --session <前缀>` 直开。 */
-async function listSessions(limit: number, ensureId?: string): Promise<SessionSummary[]> {
-  const sessions = await discoverSessions({});
+async function listSessions(
+  limit: number,
+  ensureId?: string,
+  includeIssues = false,
+): Promise<{ sessions: SessionSummary[]; issues: DiscoveryIssue[] }> {
+  const discovery = includeIssues
+    ? await discoverSessionsDetailed({})
+    : { sessions: await discoverSessions({}), issues: [] };
+  const sessions = discovery.sessions;
   const sorted = [...sessions].sort((a, b) => b.mtimeMs - a.mtimeMs);
   const top = sorted.slice(0, limit);
   // --session 指定的会话若比 limit 还老，补进列表尾——否则前端下拉里没有它，预选会静默落空。
@@ -131,7 +142,7 @@ async function listSessions(limit: number, ensureId?: string): Promise<SessionSu
     if (hit) top.push(hit);
   }
   // 标题并行流扫（peekTitle 只 parse 命中 ai-title 预过滤的行，几十个会话数百 ms 级）
-  return Promise.all(
+  const summaries = await Promise.all(
     top.map(async (s) => ({
       id: s.id,
       project: s.cwd ? path.basename(s.cwd) : s.project,
@@ -140,6 +151,7 @@ async function listSessions(limit: number, ensureId?: string): Promise<SessionSu
       title: await peekTitle(s.file),
     })),
   );
+  return { sessions: summaries, issues: discovery.issues };
 }
 
 async function findSession(id: string): Promise<SessionInfo | null> {
@@ -362,6 +374,8 @@ export interface ShareServerOptions {
   defaultSession?: string;
   idleTimeoutMs?: number | null;
   accessToken?: string;
+  surface?: ShareSurface;
+  appVersion?: string;
   locale?: Locale;
   languagePreference?: LanguagePreference;
   configHome?: string;
@@ -385,6 +399,7 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
   let locale = opts.locale ?? "zh-CN";
   let i18n = createI18n(locale);
   let languagePreference = opts.languagePreference ?? locale;
+  const surface = opts.surface ?? "browser";
   const systemLocaleDetector = opts.systemLocaleDetector ?? detectSystemLocale;
   // 启动时读 config；页面设置面板经 POST /api/config 持久化并即时更新这里
   const bootCfg = await loadConfig(opts.configHome);
@@ -546,7 +561,15 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
     touch();
 
     if (method === "GET" && p === "/") {
-      const html = renderPage(opts.defaultSession, toolDisplay, isMac, requestLocale, requestLanguagePreference);
+      const html = renderPage(
+        opts.defaultSession,
+        toolDisplay,
+        isMac,
+        requestLocale,
+        requestLanguagePreference,
+        surface,
+        opts.appVersion,
+      );
       const buf = Buffer.from(html, "utf8");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-length": buf.length });
       res.end(buf);
@@ -555,7 +578,10 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
     if (method === "GET" && p === "/api/sessions") {
       // ?ensure=<id>：前端焦点刷新时保证「当前正在看的会话」始终在列表里（可能比 limit 老）
       const ensure = url.searchParams.get("ensure") ?? opts.defaultSession;
-      sendJson(res, 200, { sessions: await listSessions(listLimit, ensure ?? undefined), limit: listLimit });
+      const result = await listSessions(listLimit, ensure ?? undefined, surface === "desktop");
+      sendJson(res, 200, surface === "desktop"
+        ? { sessions: result.sessions, limit: listLimit, issues: result.issues }
+        : { sessions: result.sessions, limit: listLimit });
       return;
     }
     if (method === "POST" && p === "/api/config") {
