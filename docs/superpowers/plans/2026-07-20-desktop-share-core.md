@@ -89,8 +89,8 @@ export function isAllowedOrigin(origin: string | undefined, expectedOrigin: stri
 
 Use `randomBytes(32).toString("base64url")` for generation and `timingSafeEqual` only after equal-length Buffer checks.
 - [ ] Add `accessToken?: string` to `ShareServerOptions`. Compute the expected Origin from the actual listener address after binding to `127.0.0.1`.
-- [ ] Keep `url` token-free for diagnostics. When authentication is enabled, return the one-use bootstrap URL as `entryUrl`; otherwise set `entryUrl === url` for the CLI.
-- [ ] Authenticate before reading POST bodies. Accept the token only on the initial `/` bootstrap request, set the cookie, then redirect so it disappears from the address bar and subsequent navigation history.
+- [ ] Keep `url` token-free for diagnostics. When authentication is enabled, return a process-local bootstrap URL as `entryUrl`; it remains replayable only until service shutdown so a lost `303` can be retried, and is never persisted. Otherwise set `entryUrl === url` for the CLI.
+- [ ] Authenticate before reading POST bodies. Accept the token only on a `GET /` bootstrap request, set the cookie, then redirect so it disappears from the address bar. The Electron caller must call `webContents.navigationHistory.clear()` after the canonical `/` page loads so the bootstrap URL is also removed from renderer history.
 - [ ] Keep `/favicon.ico` subject to the same cookie rule and never put the token into logs, rendered markup, local storage, or configuration.
 - [ ] Run `npm test -- test/share-access.test.ts test/share-server.test.ts` and confirm all tests pass.
 - [ ] Commit only the four task files with `feat: authenticate desktop Share access`.

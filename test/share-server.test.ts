@@ -372,6 +372,92 @@ describe("Share server desktop loopback access", () => {
     }
   });
 
+  it("marks every authenticated HTML, API, not-found, and error response no-store", async () => {
+    const accessToken = createShareAccessToken();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const home = await tempHome();
+    const previousHome = process.env["HOME"];
+    process.env["HOME"] = home;
+    const server = await startShareServer({
+      accessToken,
+      idleTimeoutMs: null,
+      configHome: home,
+    });
+    try {
+      const { cookie } = await bootstrapCookie(server.entryUrl);
+      const origin = server.url.slice(0, -1);
+      const requests = [
+        await fetch(server.url, { headers: { cookie } }),
+        await fetch(new URL("/api/sessions", server.url), { headers: { cookie } }),
+        await fetch(new URL("/api/session/definitely-not-a-real-session", server.url), {
+          headers: { cookie },
+        }),
+        await fetch(new URL("/missing", server.url), { headers: { cookie } }),
+        await fetch(new URL("/api/config", server.url), {
+          method: "POST",
+          headers: { cookie, origin, "content-type": "application/json" },
+          body: JSON.stringify({ sessionListLimit: 10 }),
+        }),
+        await fetch(new URL("/api/export", server.url), {
+          method: "POST",
+          headers: { cookie, origin, "content-type": "application/json" },
+          body: "{",
+        }),
+      ];
+
+      expect(requests.map((response) => response.status)).toEqual([200, 200, 404, 404, 200, 500]);
+      for (const response of requests) {
+        expect(response.headers.get("cache-control"), String(response.status)).toBe("no-store");
+      }
+    } finally {
+      await server.close();
+      if (previousHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = previousHome;
+      error.mockRestore();
+    }
+  });
+
+  it("rejects absolute, network-path, and backslash request targets before bootstrap", async () => {
+    const accessToken = createShareAccessToken();
+    const server = await startShareServer({ accessToken, idleTimeoutMs: null });
+    try {
+      const port = Number(new URL(server.url).port);
+      const targets = [
+        `//evil.example/?access=${accessToken}`,
+        `//127.0.0.1:${port}/?access=${accessToken}`,
+        `/\\evil.example/?access=${accessToken}`,
+        `http://127.0.0.1:${port}/?access=${accessToken}`,
+      ];
+
+      for (const target of targets) {
+        const response = await responseHeadForRawRequest(
+          port,
+          `GET ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`,
+        );
+        expect(response, target).toMatch(/^HTTP\/1\.1 400 /);
+        expect(response, target).not.toMatch(/^set-cookie:/im);
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("refreshes the finite idle timeout after a successful bootstrap", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = await startShareServer({ accessToken: createShareAccessToken(), idleTimeoutMs: 100 });
+    try {
+      await vi.advanceTimersByTimeAsync(60);
+      expect((await fetch(server.entryUrl, { redirect: "manual" })).status).toBe(303);
+
+      await vi.advanceTimersByTimeAsync(40);
+      expect(server.isClosed()).toBe(false);
+      await vi.advanceTimersByTimeAsync(60);
+      await expect(server.closed).resolves.toBeUndefined();
+    } finally {
+      await server.close();
+    }
+  });
+
   it("fails closed for every route before cookie authentication", async () => {
     const server = await startShareServer({ accessToken: createShareAccessToken(), idleTimeoutMs: null });
     try {

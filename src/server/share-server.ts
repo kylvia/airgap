@@ -455,32 +455,46 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
     requestLanguagePreference: LanguagePreference,
   ): Promise<void> {
     const requestTarget = req.url ?? "/";
-    if (opts.accessToken !== undefined && !requestTarget.startsWith("/")) {
-      sendAccessError(res, 400, "INVALID_REQUEST_TARGET");
-      return;
-    }
-
-    let url: URL;
-    try {
-      url = new URL(requestTarget, "http://127.0.0.1");
-    } catch (error) {
-      if (opts.accessToken === undefined) throw error;
-      sendAccessError(res, 400, "INVALID_REQUEST_TARGET");
-      return;
-    }
-    const p = url.pathname;
     const method = req.method ?? "";
-
+    let expectedHost: string | undefined;
+    let expectedOrigin: string | undefined;
+    let cookieName: string | undefined;
     if (opts.accessToken !== undefined) {
       const address = server.address();
       if (typeof address !== "object" || address === null) {
         sendAccessError(res, 401, "UNAUTHORIZED");
         return;
       }
-      const expectedHost = `127.0.0.1:${address.port}`;
-      const expectedOrigin = `http://${expectedHost}`;
+      expectedHost = `127.0.0.1:${address.port}`;
+      expectedOrigin = `http://${expectedHost}`;
+      cookieName = shareCookieName(address.port);
 
-      if (req.headers.host !== expectedHost) {
+      const isOriginForm =
+        requestTarget.startsWith("/") &&
+        !requestTarget.startsWith("//") &&
+        !requestTarget.includes("\\");
+      if (!isOriginForm) {
+        sendAccessError(res, 400, "INVALID_REQUEST_TARGET");
+        return;
+      }
+    }
+
+    let url: URL;
+    try {
+      url = new URL(requestTarget, expectedOrigin ?? "http://localhost");
+    } catch (error) {
+      if (opts.accessToken === undefined) throw error;
+      sendAccessError(res, 400, "INVALID_REQUEST_TARGET");
+      return;
+    }
+    const p = url.pathname;
+
+    if (opts.accessToken !== undefined) {
+      if (expectedHost === undefined || expectedOrigin === undefined || cookieName === undefined) {
+        sendAccessError(res, 401, "UNAUTHORIZED");
+        return;
+      }
+      if (req.headers.host !== expectedHost || url.origin !== expectedOrigin) {
         sendAccessError(res, 400, "INVALID_HOST");
         return;
       }
@@ -497,9 +511,10 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
           return;
         }
 
+        touch();
         res.writeHead(303, {
           location: "/",
-          "set-cookie": `${shareCookieName(address.port)}=${opts.accessToken}; HttpOnly; SameSite=Strict; Path=/`,
+          "set-cookie": `${cookieName}=${opts.accessToken}; HttpOnly; SameSite=Strict; Path=/`,
           "cache-control": "no-store",
           "referrer-policy": "no-referrer",
           "content-length": "0",
@@ -513,7 +528,7 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
         return;
       }
 
-      const cookieToken = readCookie(req.headers.cookie, shareCookieName(address.port));
+      const cookieToken = readCookie(req.headers.cookie, cookieName);
       if (!tokensEqual(cookieToken, opts.accessToken)) {
         sendAccessError(res, 401, "UNAUTHORIZED");
         return;
@@ -523,6 +538,8 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
         sendAccessError(res, 403, "INVALID_ORIGIN");
         return;
       }
+
+      res.setHeader("cache-control", "no-store");
     }
 
     touch();
