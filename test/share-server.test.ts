@@ -200,9 +200,9 @@ describe("renderPage desktop surface", () => {
   it("rolls the picker back and keeps export disabled when a session switch fails", () => {
     const load = page.slice(page.indexOf("async function loadSession("), page.indexOf("function renderList"));
     expect(load).toContain("const previousId = detail ? detail.id : null");
-    expect(load).toContain("setInteractionBusy(true)");
+    expect(load).toContain('beginInteraction("load")');
     expect(load).toContain('if (previousId) $("sess").value = previousId');
-    expect(load).toContain("setInteractionBusy(false)");
+    expect(load).toContain('endInteraction("load")');
     expect(page).toContain('document.querySelectorAll("footer button[data-a]")');
     expect(page).toContain("button.disabled = busy || !detail");
   });
@@ -217,16 +217,32 @@ describe("renderPage desktop surface", () => {
     expect(manual).toContain('if (refreshResult === "failed")');
   });
 
-  it("does not commit a refreshed picker that omits the loaded conversation", () => {
+  it("replaces a vanished current conversation without mixing picker and preview state", () => {
     const refresh = page.slice(page.indexOf("async function refreshSessions"), page.indexOf("let manualRefreshInFlight"));
     expect(refresh).toContain('!data.sessions.some((session) => session.id === detail.id)');
     expect(refresh).toContain('setStatus(msg("share.desktop.currentUnavailable"), true)');
-    expect(refresh).toContain('return "unavailable"');
-    expect(refresh.indexOf('return "unavailable"')).toBeLessThan(refresh.indexOf("fillOptions"));
+    expect(refresh).toContain("clearCurrentConversation()");
+    expect(refresh).toContain("fillOptions(data.sessions, null)");
+    expect(refresh).toContain("showDiscoveryState(data.sessions, data.issues || [])");
+    expect(refresh).toContain("const replacement = data.sessions[0]");
+    expect(refresh).toContain("await loadSession(replacement.id)");
+    expect(refresh).toContain('return "replaced"');
+    expect(refresh.indexOf("clearCurrentConversation()")).toBeLessThan(refresh.indexOf("fillOptions(data.sessions, null)"));
 
     const manual = page.slice(page.indexOf("async function refreshCurrentSession"), page.indexOf('$("refresh").onclick'));
-    expect(manual).toContain('refreshResult === "unavailable"');
+    expect(manual).toContain('refreshResult === "replaced"');
     expect(page).toContain("refreshSessions().catch(() => {})");
+  });
+
+  it("clears selection, preview, and export state before accepting a replacement list", () => {
+    const clear = page.slice(page.indexOf("function clearCurrentConversation"), page.indexOf("async function refreshSessions"));
+    expect(clear).toContain("detail = null");
+    expect(clear).toContain("selected.clear()");
+    expect(clear).toContain("pvReady = false");
+    expect(clear).toContain('$("list").innerHTML = ""');
+    expect(clear).toContain('const preview = $("preview")');
+    expect(clear).toContain('preview.srcdoc = ""');
+    expect(clear).toContain("renderInteractionState()");
   });
 
   it("keeps partial-provider diagnostics visible after a successful initial load", () => {
@@ -235,6 +251,14 @@ describe("renderPage desktop surface", () => {
     expect(discovery).toContain("discoveryIssueMessage = issue ? discoveryDiagnostic(issue) : null");
     const load = page.slice(page.indexOf("async function loadSession("), page.indexOf("function renderList"));
     expect(load).toContain("if (discoveryIssueMessage) setStatus(discoveryIssueMessage, true)");
+  });
+
+  it("reports refresh diagnostics without replacing an existing preview with the empty overlay", () => {
+    const refresh = page.slice(page.indexOf("async function refreshSessions"), page.indexOf("let manualRefreshInFlight"));
+    const diagnostic = refresh.slice(refresh.indexOf('if (SURFACE === "desktop" && detail && data.issues'));
+    expect(diagnostic).toContain("discoveryIssueMessage = discoveryDiagnostic(data.issues[0])");
+    expect(diagnostic).toContain("setStatus(discoveryIssueMessage, true)");
+    expect(diagnostic.slice(0, diagnostic.indexOf('return "diagnostic"'))).not.toContain("showDiscoveryState");
   });
 
   it("loads the first conversation when Recheck finds conversations after an empty start", () => {
@@ -259,10 +283,10 @@ describe("renderPage desktop surface", () => {
     const exportHandler = page.slice(page.indexOf("async function doExport"), page.indexOf("for (const btn"));
     expect(exportHandler).toContain("if (exportInFlight) return");
     expect(exportHandler).toContain("exportInFlight = true");
-    expect(exportHandler).toContain("setInteractionBusy(true)");
+    expect(exportHandler).toContain('beginInteraction("export")');
     expect(exportHandler).toContain("finally");
     expect(exportHandler).toContain("exportInFlight = false");
-    expect(exportHandler).toContain("setInteractionBusy(false)");
+    expect(exportHandler).toContain('endInteraction("export")');
     expect(exportHandler).toContain("return performExport(action, format, true)");
   });
 
@@ -303,6 +327,43 @@ describe("renderPage desktop surface", () => {
     expect(page).toContain("button.disabled = busy || !detail");
   });
 
+  it("derives one busy state from all overlapping in-flight operations", () => {
+    expect(page).toContain('const inFlight = { bootstrap: 0, refresh: 0, load: 0, export: 0, settings: 0 }');
+    expect(page).toContain("Object.values(inFlight).some((count) => count > 0)");
+    expect(page).toContain("function beginInteraction(kind)");
+    expect(page).toContain("function endInteraction(kind)");
+    expect(page).toContain("inFlight[kind] += 1");
+    expect(page).toContain("inFlight[kind] = Math.max(0, inFlight[kind] - 1)");
+    expect(page).toContain('$("refresh").disabled = busy');
+    expect(page).toContain('$("prefs").disabled = busy');
+    expect(page).toContain('$("redact").disabled = busy');
+    expect(page).toContain('for (const id of ["limit", "tools", "language"])');
+    expect(page).toContain('for (const checkbox of document.querySelectorAll("#list input[type=checkbox]"))');
+  });
+
+  it("does not let a session load unlock controls while an export remains in flight", () => {
+    const load = page.slice(page.indexOf("async function loadSession("), page.indexOf("function renderList"));
+    expect(load).toContain('beginInteraction("load")');
+    expect(load).toContain('endInteraction("load")');
+    expect(load).not.toContain("setInteractionBusy(false)");
+    expect(page).toContain("Object.values(inFlight).some((count) => count > 0)");
+  });
+
+  it("keeps refresh and settings operations inside the shared busy lifecycle", () => {
+    const refresh = page.slice(page.indexOf("async function refreshSessions"), page.indexOf("let manualRefreshInFlight"));
+    expect(refresh).toContain('beginInteraction("refresh")');
+    expect(refresh).toContain('endInteraction("refresh")');
+    for (const handler of [
+      page.slice(page.indexOf('$("limit").onchange'), page.indexOf('window.addEventListener("focus"')),
+      page.slice(page.indexOf('$("tools").onchange'), page.indexOf('$("language").onchange')),
+      page.slice(page.indexOf('$("language").onchange'), page.indexOf("loadSessions();")),
+    ]) {
+      expect(handler).toContain('beginInteraction("settings")');
+      expect(handler).toContain('endInteraction("settings")');
+      expect(handler).toContain("finally");
+    }
+  });
+
   it("keeps selection controls out of the tab order while no conversation is loaded", () => {
     expect(page).toContain('<button type="button" id="all" disabled>Select all</button>');
     expect(page).toContain('<button type="button" id="none" disabled>Clear</button>');
@@ -311,8 +372,8 @@ describe("renderPage desktop surface", () => {
     expect(page).toContain("control.disabled = disabled");
     expect(page).toContain("setSelectionControlsDisabled(busy || !detail)");
     expect(page).toContain("setSelectionControlsDisabled(visible || !detail)");
-    expect(page).toContain('$("all").onclick = () => { if (!detail) return;');
-    expect(page).toContain('$("none").onclick = () => { if (!detail) return;');
+    expect(page).toContain('$("all").onclick = () => { if (!detail || interactionBusy()) return;');
+    expect(page).toContain('$("none").onclick = () => { if (!detail || interactionBusy()) return;');
     expect(page).toContain('body[data-surface="desktop"] footer button:disabled');
   });
 
@@ -378,11 +439,11 @@ describe("renderPage internationalization", () => {
       page.indexOf('$("done").onclick'),
     );
     expect(handler).toContain('const select = $("language")');
-    expect(handler).toContain("select.disabled = true");
+    expect(handler).toContain('beginInteraction("settings")');
     expect(handler).toContain("try {");
     expect(handler).toContain("} catch {");
     expect(handler).toContain("select.value = LANGUAGE_PREFERENCE");
-    expect(handler).toContain("select.disabled = false");
+    expect(handler).toContain('endInteraction("settings")');
   });
 
   it("selects the current explicit Chinese preference", () => {

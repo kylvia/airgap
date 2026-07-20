@@ -326,6 +326,7 @@ const selected = new Set();   // 选中的轮次 index
 let pvReady = false;          // 预览 iframe 是否已加载好
 let discoveryIssueMessage = null;
 let exportInFlight = false;
+const inFlight = { bootstrap: 0, refresh: 0, load: 0, export: 0, settings: 0 };
 
 const $ = (id) => document.getElementById(id);
 function setStatus(msg, err) { const s = $("status"); s.textContent = msg; s.className = "status" + (err ? " err" : ""); }
@@ -338,13 +339,35 @@ function setSelectionControlsDisabled(disabled) {
   }
 }
 
-function setInteractionBusy(busy) {
+function interactionBusy() {
+  return Object.values(inFlight).some((count) => count > 0);
+}
+
+function renderInteractionState() {
+  const busy = interactionBusy();
   const picker = $("sess");
   picker.disabled = busy || picker.options.length === 0;
   for (const button of document.querySelectorAll("footer button[data-a]")) {
     button.disabled = busy || !detail;
   }
   setSelectionControlsDisabled(busy || !detail);
+  $("refresh").disabled = busy;
+  $("prefs").disabled = busy;
+  $("redact").disabled = busy;
+  for (const id of ["limit", "tools", "language"]) $(id).disabled = busy;
+  for (const checkbox of document.querySelectorAll("#list input[type=checkbox]")) checkbox.disabled = busy;
+  const emptyRecheck = $("empty-recheck");
+  if (emptyRecheck) emptyRecheck.disabled = busy;
+}
+
+function beginInteraction(kind) {
+  inFlight[kind] += 1;
+  renderInteractionState();
+}
+
+function endInteraction(kind) {
+  inFlight[kind] = Math.max(0, inFlight[kind] - 1);
+  renderInteractionState();
 }
 
 function setEmptyStateVisible(state, visible) {
@@ -390,7 +413,7 @@ function syncLimitSelect(limit) {
 }
 
 async function loadSessions() {
-  setInteractionBusy(true);
+  beginInteraction("bootstrap");
   try {
     const r = await fetch("/api/sessions");
     if (!r.ok) throw new Error("sessions request failed");
@@ -401,12 +424,12 @@ async function loadSessions() {
     const sel = $("sess");
     const pick = sessions.find((s) => s.id.startsWith(DEFAULT)) || sessions[0];
     if (pick) { sel.value = pick.id; await loadSession(pick.id); }
-    sel.onchange = () => loadSession(sel.value);
+    sel.onchange = () => { if (!interactionBusy()) loadSession(sel.value); };
   } catch (error) {
     if (SURFACE === "desktop") showStartupError();
     else throw error;
   } finally {
-    if (!detail) setInteractionBusy(false);
+    endInteraction("bootstrap");
   }
 }
 
@@ -459,35 +482,62 @@ function showStartupError() {
 // ai-title 会随会话演进被 Claude 持续更新——窗口重获焦点时（从 Claude Code 切回来的瞬间）
 // 静默刷新下拉标题/排序，保持当前选中与预览不动。5s 节流，防止频繁切窗口反复全量扫标题。
 let lastListRefresh = 0;
+function clearCurrentConversation() {
+  detail = null;
+  selected.clear();
+  pvReady = false;
+  $("list").innerHTML = "";
+  $("count").textContent = "";
+  $("sbanner").style.display = "none";
+  const preview = $("preview");
+  preview.onload = null;
+  preview.srcdoc = "";
+  renderInteractionState();
+}
+
 async function refreshSessions() {
-  const q = detail ? "?ensure=" + encodeURIComponent(detail.id) : "";
-  const r = await fetch("/api/sessions" + q);
-  if (!r.ok) return "failed";
-  const data = await r.json();
-  if (SURFACE === "desktop" && detail && data.issues && data.issues.length > 0) {
-    showDiscoveryState(data.sessions, data.issues);
-    return "diagnostic";
+  beginInteraction("refresh");
+  try {
+    const q = detail ? "?ensure=" + encodeURIComponent(detail.id) : "";
+    const r = await fetch("/api/sessions" + q);
+    if (!r.ok) return "failed";
+    const data = await r.json();
+    if (SURFACE === "desktop" && detail && data.issues && data.issues.length > 0) {
+      discoveryIssueMessage = discoveryDiagnostic(data.issues[0]);
+      setStatus(discoveryIssueMessage, true);
+      return "diagnostic";
+    }
+    if (SURFACE === "desktop" && detail && !data.sessions.some((session) => session.id === detail.id)) {
+      discoveryIssueMessage = null;
+      setStatus(msg("share.desktop.currentUnavailable"), true);
+      clearCurrentConversation();
+      fillOptions(data.sessions, null);
+      syncLimitSelect(data.limit);
+      showDiscoveryState(data.sessions, data.issues || []);
+      const replacement = data.sessions[0];
+      if (replacement) {
+        $("sess").value = replacement.id;
+        await loadSession(replacement.id);
+      }
+      return "replaced";
+    }
+    fillOptions(data.sessions, detail ? detail.id : null);
+    syncLimitSelect(data.limit);
+    showDiscoveryState(data.sessions, data.issues || []);
+    return "ok";
+  } finally {
+    endInteraction("refresh");
   }
-  if (SURFACE === "desktop" && detail && !data.sessions.some((session) => session.id === detail.id)) {
-    discoveryIssueMessage = null;
-    setStatus(msg("share.desktop.currentUnavailable"), true);
-    return "unavailable";
-  }
-  fillOptions(data.sessions, detail ? detail.id : null);
-  syncLimitSelect(data.limit);
-  showDiscoveryState(data.sessions, data.issues || []);
-  return "ok";
 }
 let manualRefreshInFlight = false;
 async function refreshCurrentSession() {
-  if (manualRefreshInFlight) return;
+  if (manualRefreshInFlight || interactionBusy()) return;
   manualRefreshInFlight = true;
   const button = $("refresh");
-  button.disabled = true;
   button.setAttribute("aria-busy", "true");
   try {
     const refreshResult = await refreshSessions();
-    if (refreshResult === "diagnostic" || refreshResult === "unavailable") return;
+    if (refreshResult === "diagnostic" || refreshResult === "replaced") return;
     if (refreshResult === "failed") {
       setStatus(msg(SURFACE === "desktop" ? "share.desktop.refreshListFailed" : "share.page.refreshListFailed"), true);
       return;
@@ -504,7 +554,6 @@ async function refreshCurrentSession() {
   } catch {
     setStatus(msg(SURFACE === "desktop" ? "share.desktop.refreshFailed" : "share.page.refreshFailed"), true);
   } finally {
-    button.disabled = false;
     button.removeAttribute("aria-busy");
     manualRefreshInFlight = false;
   }
@@ -513,20 +562,28 @@ $("refresh").onclick = () => { refreshCurrentSession(); };
 $("empty-recheck") && ($("empty-recheck").onclick = () => { refreshCurrentSession(); });
 ${listConfigComment}
 $("limit").onchange = async () => {
-  const n = Number($("limit").value);
-  const r = await fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionListLimit: n }) });
-  const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.saveFailed") }));
-  if (!res.ok) {
-    setStatus(SURFACE === "desktop" ? desktopSettingsError() : res.message || msg("share.page.saveFailed"), true);
-    return;
+  if (interactionBusy()) return;
+  beginInteraction("settings");
+  try {
+    const n = Number($("limit").value);
+    const r = await fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionListLimit: n }) });
+    const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.saveFailed") }));
+    if (!res.ok) {
+      setStatus(SURFACE === "desktop" ? desktopSettingsError() : res.message || msg("share.page.saveFailed"), true);
+      return;
+    }
+    setStatus(SURFACE === "desktop"
+      ? msg("share.desktop.listRefreshed")
+      : msg("share.page.listSaved", { count: res.limit }));
+    await refreshSessions();
+  } catch {
+    setStatus(SURFACE === "desktop" ? desktopSettingsError() : msg("share.page.saveFailed"), true);
+  } finally {
+    endInteraction("settings");
   }
-  setStatus(SURFACE === "desktop"
-    ? msg("share.desktop.listRefreshed")
-    : msg("share.page.listSaved", { count: res.limit }));
-  await refreshSessions();
 };
 window.addEventListener("focus", () => {
-  if (manualRefreshInFlight || Date.now() - lastListRefresh < 5000) return;
+  if (manualRefreshInFlight || interactionBusy() || Date.now() - lastListRefresh < 5000) return;
   lastListRefresh = Date.now();
   refreshSessions().catch(() => {});
 });
@@ -544,7 +601,7 @@ function setLoading(on) { $("loading").classList.toggle("on", !!on); }
 
 async function loadSession(id, keepSelection, refreshedStatus) {
   const previousId = detail ? detail.id : null;
-  setInteractionBusy(true);
+  beginInteraction("load");
   setStatus(msg("share.page.loading")); setLoading(true);
   try {
     const r = await fetch("/api/session/" + encodeURIComponent(id) + "?tools=" + encodeURIComponent($("tools").value));
@@ -575,7 +632,7 @@ ${sidScript}
     return false;
   } finally {
     setLoading(false);
-    setInteractionBusy(false);
+    endInteraction("load");
   }
 }
 
@@ -585,10 +642,12 @@ function renderList() {
     // div 而非 label：行正文点击=预览定位查看，勾选只属于 checkbox 本身——两个动作解绑。
     const row = document.createElement("div"); row.className = "row";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = selected.has(t.index);
+    cb.disabled = interactionBusy();
     cb.setAttribute("aria-label", msg("share.page.selectTurn", { index: t.index }));
-    cb.onchange = () => { cb.checked ? selected.add(t.index) : selected.delete(t.index); syncPreview(cb.checked ? t.index : null); updateCount(); };
+    cb.onchange = () => { if (interactionBusy()) return; cb.checked ? selected.add(t.index) : selected.delete(t.index); syncPreview(cb.checked ? t.index : null); updateCount(); };
     // 行点击只对已勾选轮定位滚动；未勾选轮不在预览里（预览=导出），给一句状态提示防「点了没反应」。
     row.onclick = (e) => {
+      if (interactionBusy()) return;
       if (e.target === cb) return;
       if (selected.has(t.index)) syncPreview(t.index);
       else setStatus(msg("share.page.unselectedTurn", { index: t.index }));
@@ -658,12 +717,12 @@ function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(
 async function doExport(action, format, acceptRisk) {
   if (exportInFlight) return;
   exportInFlight = true;
-  setInteractionBusy(true);
+  beginInteraction("export");
   try {
     return await performExport(action, format, acceptRisk);
   } finally {
     exportInFlight = false;
-    setInteractionBusy(false);
+    endInteraction("export");
   }
 }
 
@@ -703,8 +762,8 @@ async function performExport(action, format, acceptRisk) {
 for (const btn of document.querySelectorAll("footer button[data-a]")) {
   btn.onclick = () => doExport(btn.dataset.a, btn.dataset.f);
 }
-$("all").onclick = () => { if (!detail) return; for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
-$("none").onclick = () => { if (!detail) return; selected.clear(); renderList(); updateCount(); syncPreview(null); };
+$("all").onclick = () => { if (!detail || interactionBusy()) return; for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
+$("none").onclick = () => { if (!detail || interactionBusy()) return; selected.clear(); renderList(); updateCount(); syncPreview(null); };
 // 设置面板开关：点按钮 toggle；点面板外或按 Esc 关闭（面板内点击冒泡到 document 时被 contains 放行）。
 function setPreferencesOpen(open, restoreFocus) {
   const panel = $("prefpanel");
@@ -713,21 +772,28 @@ function setPreferencesOpen(open, restoreFocus) {
   if (SURFACE === "desktop") button.setAttribute("aria-expanded", String(open));
   if (restoreFocus) button.focus();
 }
-$("prefs").onclick = (e) => { e.stopPropagation(); setPreferencesOpen($("prefpanel").hidden, false); };
+$("prefs").onclick = (e) => { if (interactionBusy()) return; e.stopPropagation(); setPreferencesOpen($("prefpanel").hidden, false); };
 document.addEventListener("click", (e) => { const p = $("prefpanel"); if (!p.hidden && !p.contains(e.target)) setPreferencesOpen(false, false); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("prefpanel").hidden) setPreferencesOpen(false, true); });
 // 切换工具展示级别：服务端按新级别重渲各轮片段（预览=导出，物理裁剪而非 CSS 隐藏），保留已勾选轮次；
 // 同时静默持久化到 config.json——先等预览刷新（用户在等它），保存失败的提示最后落地不被刷新提示覆盖。
 $("tools").onchange = async () => {
-  const save = fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ toolDisplay: $("tools").value }) })
-    .then((r) => r.json()).catch(() => ({ ok: false, message: msg("share.page.toolSaveFailed") }));
-  if (detail) await loadSession(detail.id, true);
-  const res = await save;
-  if (!res.ok) setStatus(SURFACE === "desktop" ? desktopSettingsError() : res.message || msg("share.page.toolSaveFailed"), true);
+  if (interactionBusy()) return;
+  beginInteraction("settings");
+  try {
+    const save = fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ toolDisplay: $("tools").value }) })
+      .then((r) => r.json()).catch(() => ({ ok: false, message: msg("share.page.toolSaveFailed") }));
+    if (detail) await loadSession(detail.id, true);
+    const res = await save;
+    if (!res.ok) setStatus(SURFACE === "desktop" ? desktopSettingsError() : res.message || msg("share.page.toolSaveFailed"), true);
+  } finally {
+    endInteraction("settings");
+  }
 };
 $("language").onchange = async () => {
+  if (interactionBusy()) return;
+  beginInteraction("settings");
   const select = $("language");
-  select.disabled = true;
   try {
     const r = await fetch("/api/config", {
       method: "POST",
@@ -745,7 +811,7 @@ $("language").onchange = async () => {
     select.value = LANGUAGE_PREFERENCE;
     setStatus(SURFACE === "desktop" ? desktopSettingsError() : msg("share.page.languageSaveFailed"), true);
   } finally {
-    select.disabled = false;
+    endInteraction("settings");
   }
 };
 ${doneScript}
