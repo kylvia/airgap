@@ -133,6 +133,7 @@ Use `randomBytes(32).toString("base64url")` for generation and `timingSafeEqual`
 - Create: `src/server/share-export.ts`
 - Create: `test/share-export.test.ts`
 - Modify: `src/server/share-server.ts`
+- Modify: `src/server/page.ts`
 - Modify: `test/share-server.test.ts`
 
 - [ ] Write adapter-first tests using a fake that records calls and never invokes Chrome, `osascript`, `pbcopy`, or the filesystem. Cover copy image, save image, copy text, save cancellation, capture failure, clipboard failure, and file-write failure.
@@ -148,8 +149,8 @@ export interface SaveFileRequest {
 
 export interface ShareExportAdapter {
   renderPng(html: string): Promise<Buffer>;
-  copyImage(png: Buffer): Promise<void>;
-  copyText(text: string): Promise<void>;
+  copyImage?(png: Buffer): Promise<void>;
+  copyText?(text: string): Promise<void>;
   saveFile(request: SaveFileRequest): Promise<string | null>;
 }
 
@@ -159,10 +160,14 @@ export interface ShareExportCoordinator {
 }
 ```
 
+Define `ExportRequest` and `ExportResult` in this module as public contracts. The request carries the session ID, selected turn indexes, action, format, redaction/risk policy, tool display, and locale; it must not carry pre-rendered HTML or text. Inject session resolution into `createShareExportCoordinator()` so session reads, policy checks, rendering, and adapter calls all belong to one tracked export operation.
+
 - [ ] Move the current Chrome capture, macOS clipboard commands, and Desktop fallback save behavior into `createCliExportAdapter()`. Preserve byte-for-byte CLI output and existing platform guards.
-- [ ] Make detection/redaction/rendering happen in the coordinator before invoking an adapter. Track only active explicit exports so `whenIdle()` can be used during desktop shutdown; settle it on both success and failure.
+- [ ] Make detection/redaction/rendering happen in the coordinator before invoking an adapter. Register the operation before session resolution, track only active explicit exports, and settle it on success, cancellation, and failure.
 - [ ] Add `exportAdapter?: ShareExportAdapter` to `ShareServerOptions`; default to `createCliExportAdapter()` so the CLI requires no caller change.
-- [ ] Route the existing export endpoint through the coordinator and retain distinct error codes for policy block, render, capture, clipboard, cancel, and save failures.
+- [ ] Add `whenExportsIdle(): Promise<void>` to `ShareServer` and delegate it to the coordinator. `close()` stops accepting requests but does not implicitly wait; the desktop caller can start `close()` and await it together with `whenExportsIdle()` before quitting.
+- [ ] Route the existing export endpoint through the coordinator and retain distinct error codes for policy block, render, capture, clipboard, cancel, and save failures. Check optional clipboard capabilities before rendering so the existing non-macOS `CLIPBOARD_UNSUPPORTED` precedence is unchanged.
+- [ ] Treat `saveFile()` returning `null` as an HTTP-200 cancellation with `EXPORT_CANCELLED`, not success or failure. Update the shared page to leave its selection intact and make no success/failure claim for that result.
 - [ ] Run `npm test -- test/share-export.test.ts test/share-server.test.ts`, then `npm run typecheck`.
 - [ ] Commit only the four task files with `refactor: extract Share export adapters`.
 

@@ -99,9 +99,10 @@ export interface DesktopRuntime {
 ```
 
 - [ ] Write failing tests for first launch, second-launch focus, service startup failure with retry/quit actions, last-window shutdown, and simultaneous retry/close. Assert exactly one service and one window exist at any time.
-- [ ] Include a shutdown-order test that records `exportCoordinator.whenIdle`, `server.close`, `window closed`, and `runtime.quit`; require the service port to be released before `quit()`.
+- [ ] Include a shutdown-order test that records `server.close`, `server.whenExportsIdle`, `window closed`, and `runtime.quit`; require the service port to be released and in-flight exports to settle before `quit()`.
 - [ ] Run `npm run desktop:test -- app-controller.test.ts` and confirm failures.
 - [ ] Implement an explicit state machine with states `starting`, `ready`, `closing`, and `closed`. Cache the startup and shutdown promises so reentrant calls share one operation.
+- [ ] On shutdown, start `server.close()` first so no new export request can enter, then await it together with `server.whenExportsIdle()` before calling `runtime.quit()`.
 - [ ] Start the shared server with exactly these desktop policies:
 
 ```ts
