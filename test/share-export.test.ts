@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RuleMatch, Turn } from "../src/types.js";
 import {
+  CliChromeMissingError,
+  createCliExportAdapter,
   createShareExportCoordinator,
   type ExportRequest,
   type ExportSelection,
@@ -169,6 +171,37 @@ describe("Share export coordinator", () => {
     expect(text).toContain("REDACTED");
   });
 
+  it("redacts a secret in the conversation title before rendering", async () => {
+    const secret = "sk-ant-TITLE-LEAK";
+    const finding: RuleMatch = { ruleId: "anthropic-key", severity: "critical", secret, preview: "sk-a…LEAK" };
+    const { adapter } = fakeAdapter();
+    const exportCoordinator = createShareExportCoordinator({
+      adapter,
+      resolveSelection: vi.fn(async () => ({ ...selection, title: secret })),
+      scan: (value) => value.includes(secret) ? [finding] : [],
+    });
+
+    await exportCoordinator.export(baseRequest);
+    const html = vi.mocked(adapter.renderPng).mock.calls[0]![0];
+    expect(html).not.toContain(secret);
+    expect(html).toContain("REDACTED");
+  });
+
+  it("blocks an unredacted secret found only in the conversation title", async () => {
+    const secret = "sk-ant-TITLE-LEAK";
+    const finding: RuleMatch = { ruleId: "anthropic-key", severity: "critical", secret, preview: "sk-a…LEAK" };
+    const { adapter } = fakeAdapter();
+    const exportCoordinator = createShareExportCoordinator({
+      adapter,
+      resolveSelection: vi.fn(async () => ({ ...selection, title: secret })),
+      scan: (value) => value.includes(secret) ? [finding] : [],
+    });
+
+    const result = await exportCoordinator.export({ ...baseRequest, redact: false });
+    expect(result).toMatchObject({ outcome: "error", code: "EXPORT_SECRET_RISK", blocked: true });
+    expect(adapter.renderPng).not.toHaveBeenCalled();
+  });
+
   it("blocks an unredacted secret before invoking the adapter", async () => {
     const secret = "sk-ant-LEAK";
     const finding: RuleMatch = { ruleId: "anthropic-key", severity: "critical", secret, preview: "sk-a…LEAK" };
@@ -220,5 +253,28 @@ describe("Share export coordinator", () => {
     const exportCoordinator = coordinator(adapter);
     await exportCoordinator.export(baseRequest);
     await expect(exportCoordinator.whenIdle()).resolves.toBeUndefined();
+  });
+
+  it("rejects path-like suggested names inside the CLI adapter", async () => {
+    const adapter = createCliExportAdapter();
+    await expect(adapter.saveFile({ suggestedName: "../../../.zshrc", data: "bad" }))
+      .rejects.toThrow(/filename/i);
+  });
+
+  it("reports the actionable localized Chrome-missing diagnostic", async () => {
+    const onError = vi.fn();
+    const { adapter } = fakeAdapter({
+      renderPng: vi.fn(async () => { throw new CliChromeMissingError(); }),
+    });
+    const exportCoordinator = createShareExportCoordinator({
+      adapter,
+      resolveSelection: vi.fn(async () => selection),
+      onError,
+    });
+
+    await exportCoordinator.export({ ...baseRequest, locale: "zh-CN", action: "download" });
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringMatching(/CHROME_PATH.*HTML\/Markdown/),
+    }));
   });
 });

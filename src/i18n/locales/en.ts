@@ -148,6 +148,7 @@ export const en = {
   "share.api.imageCopied": "Image copied to the clipboard{note}. Paste with Cmd-V.",
   "share.api.unknownAction": "Unknown action",
   "share.api.chromeMissing": "Local Chrome/Chromium was not found and is required for PNG export. Set CHROME_PATH or export HTML/Markdown instead.",
+  "share.api.invalidExportRequest": "Invalid export request.",
   "share.api.configInteger": "sessionListLimit must be an integer",
   "share.api.configToolDisplay": "toolDisplay accepts only {values}",
   "share.api.configLanguage": "language accepts only {values}",

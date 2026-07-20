@@ -69,6 +69,13 @@ export interface ShareExportCoordinatorOptions {
   now?: () => Date;
 }
 
+export class CliChromeMissingError extends Error {
+  constructor() {
+    super("Chrome/Chromium is required to render PNG exports");
+    this.name = "CliChromeMissingError";
+  }
+}
+
 function stamp(now: Date): string {
   const p2 = (value: number): string => String(value).padStart(2, "0");
   return `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`;
@@ -83,7 +90,7 @@ function run(command: string, args: string[], stdin?: string): Promise<void> {
 
 async function renderPngWithChrome(html: string): Promise<Buffer> {
   const chrome = findChrome();
-  if (!chrome) throw new Error("Chrome/Chromium is required to render PNG exports");
+  if (!chrome) throw new CliChromeMissingError();
   const pngPath = path.join(os.tmpdir(), `airgap-share-${randomUUID()}.png`);
   try {
     await renderPngViaChrome(html, pngPath, chrome);
@@ -108,9 +115,19 @@ export function createCliExportAdapter(): ShareExportAdapter {
   const adapter: ShareExportAdapter = {
     renderPng: renderPngWithChrome,
     async saveFile(request) {
+      if (
+        request.suggestedName.length === 0 ||
+        path.basename(request.suggestedName) !== request.suggestedName ||
+        request.suggestedName === "." ||
+        request.suggestedName === ".."
+      ) {
+        throw new Error("Invalid export filename");
+      }
       const desktop = process.env["XDG_DESKTOP_DIR"] || path.join(os.homedir(), "Desktop");
       await mkdir(desktop, { recursive: true });
-      const outPath = path.join(desktop, request.suggestedName);
+      const desktopRoot = path.resolve(desktop);
+      const outPath = path.resolve(desktopRoot, request.suggestedName);
+      if (path.dirname(outPath) !== desktopRoot) throw new Error("Invalid export filename");
       if (typeof request.data === "string") await writeFile(outPath, request.data, "utf8");
       else await writeFile(outPath, request.data);
       return outPath;
@@ -182,25 +199,28 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
     }
 
     let turns = selection.turns;
+    let title = selection.title;
+    const titleTurn: Turn = { index: -1, userText: title, timestamp: null, assistant: [] };
     let redactNote = "";
     if (request.redact) {
-      const redacted = redactTurns(turns, scan);
-      turns = redacted.turns;
+      const redacted = redactTurns([titleTurn, ...turns], scan);
+      title = redacted.turns[0]!.userText;
+      turns = redacted.turns.slice(1);
       if (redacted.count > 0) redactNote = i18n.t("share.api.redactedNote", { count: redacted.count });
     } else {
-      const reason = exportBlockReason(turns, request.acceptRisk, scan, request.locale);
+      const reason = exportBlockReason([titleTurn, ...turns], request.acceptRisk, scan, request.locale);
       if (reason) return errorResult("EXPORT_SECRET_RISK", reason, true);
     }
 
     const basename = `airgap-share-${stamp(now())}`;
     const renderHtmlData = (): string => htmlRenderer(
       turns,
-      { title: selection.title, date: selection.date },
+      { title, date: selection.date },
       { tools: request.tools, locale: request.locale },
     );
     const renderMarkdownData = (): string => markdownRenderer(
       turns,
-      { title: selection.title, date: selection.date },
+      { title, date: selection.date },
       { tools: request.tools, locale: request.locale },
     );
     const capture = async (): Promise<Buffer | ExportResult> => {
@@ -213,7 +233,9 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
       try {
         return await options.adapter.renderPng(html);
       } catch (error) {
-        report(error);
+        report(error instanceof CliChromeMissingError
+          ? new Error(i18n.t("share.api.chromeMissing"))
+          : error);
         return errorResult("EXPORT_CAPTURE_FAILED", i18n.t("share.api.internal"));
       }
     };

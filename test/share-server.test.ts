@@ -611,6 +611,37 @@ describe("Share server locale wiring", () => {
 });
 
 describe("Share server export adapter wiring", () => {
+  it.each([
+    null,
+    {},
+    { turns: [1], action: "save", format: "../../../.zshrc", redact: true },
+    { sessionId: "session", turns: "1", action: "save", format: "md", redact: true },
+    { sessionId: "session", turns: [1], action: "save", format: "md", redact: "yes" },
+  ])("rejects an invalid export body before session lookup or adapter use: %j", async (body) => {
+    const adapter: ShareExportAdapter = {
+      renderPng: vi.fn(async () => Buffer.from("png")),
+      copyImage: vi.fn(async () => {}),
+      copyText: vi.fn(async () => {}),
+      saveFile: vi.fn(async () => "/unused"),
+    };
+    const server = await startShareServer({ idleTimeoutMs: null, exportAdapter: adapter });
+    try {
+      const response = await fetch(new URL("/api/export", server.url), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ ok: false, code: "INVALID_EXPORT_REQUEST" });
+      expect(adapter.renderPng).not.toHaveBeenCalled();
+      expect(adapter.copyImage).not.toHaveBeenCalled();
+      expect(adapter.copyText).not.toHaveBeenCalled();
+      expect(adapter.saveFile).not.toHaveBeenCalled();
+    } finally {
+      await server.close();
+    }
+  });
+
   it("counts an export from route entry before its request body finishes", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const adapter: ShareExportAdapter = {
@@ -641,6 +672,7 @@ describe("Share server export adapter wiring", () => {
     } finally {
       socket.destroy();
       await server.close();
+      await new Promise<void>((resolve) => setImmediate(resolve));
       error.mockRestore();
     }
   });

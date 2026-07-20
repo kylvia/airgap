@@ -106,6 +106,22 @@ interface ExportBody {
   tools?: string;
 }
 
+function parseExportBody(value: unknown): ExportBody | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const body = value as Record<string, unknown>;
+  if (typeof body["sessionId"] !== "string" || body["sessionId"].length === 0) return null;
+  if (
+    !Array.isArray(body["turns"]) ||
+    !body["turns"].every((turn) => typeof turn === "number" && Number.isSafeInteger(turn) && turn >= 0)
+  ) return null;
+  if (!(["clipboard", "save", "download"] as const).includes(body["action"] as ExportAction)) return null;
+  if (!(["png", "html", "md"] as const).includes(body["format"] as ExportFormat)) return null;
+  if (body["redact"] !== undefined && typeof body["redact"] !== "boolean") return null;
+  if (body["acceptRisk"] !== undefined && typeof body["acceptRisk"] !== "boolean") return null;
+  if (body["tools"] !== undefined && typeof body["tools"] !== "string") return null;
+  return body as unknown as ExportBody;
+}
+
 /** 宽松解析工具展示级别：非法/缺省一律回落默认，绝不因 UI 参数报错。 */
 function parseToolDisplay(v: unknown): ToolDisplay {
   return typeof v === "string" && (TOOL_DISPLAYS as readonly string[]).includes(v) ? (v as ToolDisplay) : DEFAULT_TOOL_DISPLAY;
@@ -596,7 +612,15 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
     if (method === "POST" && p === "/api/export") {
       activeExportRequests += 1;
       try {
-        const body = JSON.parse(await readBody(req, requestLocale)) as ExportBody;
+        const body = parseExportBody(JSON.parse(await readBody(req, requestLocale)));
+        if (body === null) {
+          sendJson(res, 400, {
+            ok: false,
+            code: "INVALID_EXPORT_REQUEST",
+            message: requestI18n.t("share.api.invalidExportRequest"),
+          });
+          return;
+        }
         const result = await exportCoordinator.export({
           sessionId: body.sessionId,
           turns: body.turns,

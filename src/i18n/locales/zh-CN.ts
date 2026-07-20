@@ -150,6 +150,7 @@ export const zhCN = {
   "share.api.imageCopied": "长图已复制到剪贴板{note}，Cmd-V 粘贴。",
   "share.api.unknownAction": "未知操作",
   "share.api.chromeMissing": "没找到本机 Chrome/Chromium（出图需要它）。可设 CHROME_PATH，或改用 HTML/Markdown。",
+  "share.api.invalidExportRequest": "导出请求无效。",
   "share.api.configInteger": "sessionListLimit 需要整数",
   "share.api.configToolDisplay": "toolDisplay 只接受 {values}",
   "share.api.configLanguage": "language 只接受 {values}",
