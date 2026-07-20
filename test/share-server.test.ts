@@ -417,7 +417,7 @@ describe("Share server desktop loopback access", () => {
     }
   });
 
-  it("rejects absolute, network-path, and backslash request targets before bootstrap", async () => {
+  it("rejects absolute, network-path, backslash, and fragmented request targets before bootstrap", async () => {
     const accessToken = createShareAccessToken();
     const server = await startShareServer({ accessToken, idleTimeoutMs: null });
     try {
@@ -427,6 +427,7 @@ describe("Share server desktop loopback access", () => {
         `//127.0.0.1:${port}/?access=${accessToken}`,
         `/\\evil.example/?access=${accessToken}`,
         `http://127.0.0.1:${port}/?access=${accessToken}`,
+        `/?access=${accessToken}#fragment`,
       ];
 
       for (const target of targets) {

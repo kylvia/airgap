@@ -472,7 +472,8 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
       const isOriginForm =
         requestTarget.startsWith("/") &&
         !requestTarget.startsWith("//") &&
-        !requestTarget.includes("\\");
+        !requestTarget.includes("\\") &&
+        !requestTarget.includes("#");
       if (!isOriginForm) {
         sendAccessError(res, 400, "INVALID_REQUEST_TARGET");
         return;
