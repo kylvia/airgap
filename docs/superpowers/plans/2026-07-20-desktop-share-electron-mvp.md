@@ -28,7 +28,7 @@ npm view @electron-forge/maker-dmg@7.11.2 name version repository engines time.7
 npm view @electron-forge/maker-zip@7.11.2 name version repository engines time.7.11.2 scripts
 ```
 
-Confirm each package is from the official Electron GitHub organization and has been public for at least seven days. Electron's install step downloads its pinned runtime from Electron GitHub Releases; record any newly reported install script before approving it. If any fact differs, stop and update this plan rather than silently selecting `latest`.
+Confirm each package is from the official Electron GitHub organization and has been public for at least seven days. Record the published lifecycle scripts and binaries before approving it. Electron 43.1.0 publishes no npm lifecycle script; it exposes the `electron` and `install-electron` binaries and downloads its pinned runtime on first development invocation, as documented by Electron. If any fact differs, stop and update this plan rather than silently selecting `latest`.
 - [ ] Add `"workspaces": ["apps/desktop"]` to the root package. Keep the existing root `files` list unchanged so `npm pack --dry-run` still excludes `apps/desktop`.
 - [ ] Add root scripts:
 
@@ -65,7 +65,7 @@ Confirm each package is from the official Electron GitHub organization and has b
 ```
 
 - [ ] Make the desktop TypeScript config extend `../../tsconfig.json`, set `rootDir` to `../..`, and include `src/**/*.ts` plus `test/**/*.ts`. Configure Forge with `packagerConfig.asar: true`, the DMG and ZIP makers, and no publisher yet; signing is added only in the release plan.
-- [ ] Run `npm install` once to update the root lockfile, then run `npm ls electron @electron-forge/cli @electron-forge/maker-dmg @electron-forge/maker-zip` and confirm the exact versions.
+- [ ] Run `npm install` once to update the root lockfile, then run `npm ls electron @electron-forge/cli @electron-forge/maker-dmg @electron-forge/maker-zip` and confirm the exact versions. Run `npx electron --version` to trigger and verify the pinned runtime download; do not describe that download as an npm install script.
 - [ ] Run `npm pack --dry-run` and confirm no `apps/desktop` path appears.
 - [ ] Commit only the five task files with `build: scaffold desktop workspace`.
 
