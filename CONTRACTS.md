@@ -2,7 +2,7 @@
 
 所有共享类型在 `src/types.ts`（只读，不得修改）。工具函数在 `src/util/jsonl.ts`、`src/util/text.ts`（只读）。
 ESM 项目：相对导入必须带 `.js` 后缀（`import { streamLines } from "../util/jsonl.js"`）。
-Node ≥18，TS strict。测试用 vitest，放 `test/`，fixtures 放 `test/fixtures/`。
+Node ≥22，TS strict。测试用 vitest，放 `test/`，fixtures 放 `test/fixtures/`。
 
 ## 模块归属与导出签名
 

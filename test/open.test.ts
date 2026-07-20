@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import pc from "picocolors";
 import * as yazl from "yazl";
 import { afterAll, describe, expect, it } from "vitest";
 import { runOpen } from "../src/commands/open.js";
@@ -106,7 +107,7 @@ describe("F6 sanitizeForTerminal", () => {
       transcript: okTranscript,
       manifest: {
         title: "clear\x1b[2Jscreen\x1b]52;c;cA==\x07",
-        producer: "airgap/\x1b[31mFAKE",
+        producer: "airgap/\x1b[1mFAKE\x1b[32mGREEN",
         source: { tool: "claude", toolVersion: "\x1b[2J", dialect: "claude-jsonl-tree/1" },
         redaction: [
           { ruleId: "evil\x1b[2J", severity: "critical" as const, placeholder: "\x1b]52;c;x\x07", count: 1 },
@@ -117,10 +118,18 @@ describe("F6 sanitizeForTerminal", () => {
     // print-only so we exercise the receipt without installing
     await runOpen(out, { printOnly: true }, { tmpdir: tmp, log: (l) => logs.push(l) });
     const joined = logs.join("\n");
-    // The load-bearing property: no ESC survives, so no bracket/OSC sequence is
-    // ever *active*. Residual literal text like "[2J" without a leading ESC is
-    // inert plain text and cannot manipulate the terminal.
-    expect(joined).not.toContain("\x1b");
+    // Only these complete, static lines are allowed to carry Airgap's own SGR
+    // formatting. Every line that can include manifest data must remain ESC-free,
+    // even when an attacker injects the same bold/green codes Airgap itself uses.
+    const trustedStyledLines = new Set([
+      pc.bold("── 信任回执 ────────────────────────────"),
+      `  闭包       ${pc.green("完整")}`,
+      pc.bold("────────────────────────────────────────"),
+    ]);
+    for (const line of logs) {
+      if (!trustedStyledLines.has(line)) expect(line).not.toContain("\x1b");
+    }
+    expect(joined).toContain("airgap/[1mFAKE[32mGREEN");
     // OSC 52 payload bodies are consumed entirely.
     expect(joined).not.toContain("cA==");
     expect(joined).not.toMatch(/]52;/);

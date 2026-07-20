@@ -23,7 +23,7 @@ Session processing stays on your machine. No account or session upload. Airgap i
 
 ## Install
 
-Requires **Node.js 18 or newer**. Run any command without a global install as `npx airgap <command>`, or install the CLI globally:
+Requires **Node.js 22 or newer**. Run any command without a global install as `npx airgap <command>`, or install the CLI globally:
 
 ```sh
 npm install -g airgap

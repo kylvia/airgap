@@ -60,7 +60,7 @@ describe("shared airgap plugin package", () => {
     expect(command).toContain("if (opts.open !== false) openBrowser(server.url)");
   });
 
-  it("keeps the share-command regression harness compatible with Node 18", async () => {
+  it("keeps the share-command regression harness compatible with Node 22", async () => {
     const harness = await readRepoFile("test/share-command.test.ts");
     expect(harness).not.toContain("--import");
     expect(harness).not.toContain("--input-type");
@@ -78,7 +78,7 @@ describe("Claude quick launch", () => {
     expect(command).not.toContain("npx airgap share");
     expect(command).not.toContain("airgap*");
     expect(command).toContain("background execution");
-    expect(command).toContain("http://localhost:<port>/");
+    expect(command).toContain("http://127.0.0.1:<port>/");
     expect(command).toContain("Do not claim success");
     expect(command).toContain("run `airgap share` in a terminal");
     expect(command).not.toContain("Option 1 (default)");
@@ -159,7 +159,7 @@ describe("Codex quick launch", () => {
     expect(skill).toMatch(/^---\nname: airgap-share\ndescription:/);
     expect(skill).toContain("airgap share");
     expect(skill).toContain("background or long-running process support");
-    expect(skill).toContain("http://localhost:<port>/");
+    expect(skill).toContain("http://127.0.0.1:<port>/");
     expect(skill).toContain("Never create a daemon");
     expect(skill).toContain("Never modify shell startup files");
     expect(skill).toContain("run `airgap share` in a terminal");

@@ -143,6 +143,7 @@ describe("Share server locale wiring", () => {
   it("serves the resolved locale and stable localized API errors", async () => {
     const server = await startShareServer({ locale: "en" });
     try {
+      expect(new URL(server.url).hostname).toBe("127.0.0.1");
       const page = await fetch(server.url).then((response) => response.text());
       expect(page).toContain('<html lang="en">');
       expect(page).toContain("Share session turns");

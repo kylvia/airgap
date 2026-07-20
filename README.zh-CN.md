@@ -23,7 +23,7 @@
 
 ## 安装
 
-需要 **Node.js 18 或更高版本**。无需全局安装，直接用 `npx airgap <命令>` 即可运行；也可以全局安装 CLI：
+需要 **Node.js 22 或更高版本**。无需全局安装，直接用 `npx airgap <命令>` 即可运行；也可以全局安装 CLI：
 
 ```sh
 npm install -g airgap

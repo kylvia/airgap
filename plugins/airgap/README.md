@@ -64,7 +64,7 @@ Open a new task or restart Codex so the skill is discovered, then invoke `$airga
 
 ### Codex skill
 
-`$airgap-share` starts the same local picker and returns its localhost URL. Its trigger is intentionally narrow: opening airgap share or sharing selected turns from the current Claude or Codex coding conversation.
+`$airgap-share` starts the same local picker and returns its loopback URL. Its trigger is intentionally narrow: opening airgap share or sharing selected turns from the current Claude or Codex coding conversation.
 
 ### Claude PreCompact rescue hook
 
@@ -74,7 +74,7 @@ Snapshots are named `<UTC-timestamp>__<manual|auto>__<session-id>.jsonl`, stored
 
 ## Requirements
 
-- Node.js 18 or newer.
+- Node.js 22 or newer.
 - A trusted local checkout prepared with `npm run build && npm link`.
 - Claude Code plugin support for Claude commands/hooks, or Codex plugin support for the Codex skill.
 
