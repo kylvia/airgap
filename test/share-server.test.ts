@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuleMatch, Turn } from "../src/types.js";
+import { createShareAccessToken, shareCookieName } from "../src/server/share-access.js";
 import { exportBlockReason, startShareServer } from "../src/server/share-server.js";
 import { renderPage, serializeForScript } from "../src/server/page.js";
 
@@ -29,6 +30,42 @@ afterEach(async () => {
   vi.useRealTimers();
   await Promise.all(tempHomes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
 });
+
+async function responseHeadForRawRequest(port: number, request: string): Promise<string> {
+  const socket = createConnection({ host: "127.0.0.1", port });
+  socket.on("error", () => {});
+  await once(socket, "connect");
+  socket.write(request);
+
+  return new Promise<string>((resolve, reject) => {
+    let received = "";
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("timed out waiting for HTTP response headers"));
+    }, 1_000);
+    socket.on("data", (chunk: Buffer) => {
+      received += chunk.toString("utf8");
+      const end = received.indexOf("\r\n\r\n");
+      if (end === -1) return;
+      clearTimeout(timeout);
+      socket.destroy();
+      resolve(received.slice(0, end + 4));
+    });
+    socket.on("close", () => {
+      if (!received.includes("\r\n\r\n")) {
+        clearTimeout(timeout);
+        reject(new Error("connection closed before HTTP response headers"));
+      }
+    });
+  });
+}
+
+async function bootstrapCookie(entryUrl: string): Promise<{ response: Response; cookie: string }> {
+  const response = await fetch(entryUrl, { redirect: "manual" });
+  const setCookie = response.headers.get("set-cookie");
+  if (setCookie === null) throw new Error("bootstrap response did not set a cookie");
+  return { response, cookie: setCookie.split(";", 1)[0] ?? "" };
+}
 
 /** A tool turn whose only secret (if any) sits in the requested slot; summary/user text stay clean. */
 function toolTurn(secretIn: "input" | "result" | "none"): Turn {
@@ -266,6 +303,235 @@ describe("Share server locale wiring", () => {
       });
     } finally {
       await server.close();
+    }
+  });
+});
+
+describe("Share server desktop loopback access", () => {
+  it.each(["", "short", "a".repeat(42), "a".repeat(44), "_".repeat(43)])(
+    "rejects an invalid configured capability before listening: %s",
+    async (accessToken) => {
+      await expect(startShareServer({ accessToken, idleTimeoutMs: null })).rejects.toThrow(/accessToken/);
+    },
+  );
+
+  it("keeps the CLI surface unauthenticated when no capability is configured", async () => {
+    const server = await startShareServer({ idleTimeoutMs: null });
+    try {
+      expect((await fetch(server.url)).status).toBe(200);
+      expect((await fetch(new URL("/missing", server.url))).status).toBe(404);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("bootstraps an isolated HttpOnly cookie without leaking the token into url or HTML", async () => {
+    const accessToken = createShareAccessToken();
+    const server = await startShareServer({ accessToken, idleTimeoutMs: null });
+    try {
+      const port = Number(new URL(server.url).port);
+      expect(server.url).toBe(`http://127.0.0.1:${port}/`);
+      expect(server.url).not.toContain(accessToken);
+      expect(server.entryUrl).toBe(`${server.url}?access=${accessToken}`);
+
+      const { response, cookie } = await bootstrapCookie(server.entryUrl);
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe("/");
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(response.headers.get("set-cookie")).toBe(
+        `${shareCookieName(port)}=${accessToken}; HttpOnly; SameSite=Strict; Path=/`,
+      );
+
+      const pageResponse = await fetch(server.url, { headers: { cookie } });
+      expect(pageResponse.status).toBe(200);
+      const html = await pageResponse.text();
+      expect(html).not.toContain(accessToken);
+
+      const nonCookieResponseData = [
+        String(response.status),
+        response.headers.get("location") ?? "",
+        response.headers.get("cache-control") ?? "",
+        response.headers.get("referrer-policy") ?? "",
+        await response.text(),
+        html,
+      ].join("\n");
+      expect(nonCookieResponseData).not.toContain(accessToken);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("allows the process-local bootstrap capability to be replayed until shutdown", async () => {
+    const server = await startShareServer({ accessToken: createShareAccessToken(), idleTimeoutMs: null });
+    try {
+      expect((await fetch(server.entryUrl, { redirect: "manual" })).status).toBe(303);
+      expect((await fetch(server.entryUrl, { redirect: "manual" })).status).toBe(303);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("fails closed for every route before cookie authentication", async () => {
+    const server = await startShareServer({ accessToken: createShareAccessToken(), idleTimeoutMs: null });
+    try {
+      for (const pathname of ["/", "/favicon.ico", "/missing", "/api/sessions"]) {
+        const response = await fetch(new URL(pathname, server.url));
+        expect(response.status, pathname).toBe(401);
+        await expect(response.json()).resolves.toMatchObject({ code: "UNAUTHORIZED" });
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects malformed bootstrap queries even when a valid cookie is present", async () => {
+    const accessToken = createShareAccessToken();
+    const server = await startShareServer({ accessToken, idleTimeoutMs: null });
+    try {
+      const { cookie } = await bootstrapCookie(server.entryUrl);
+      const malformed = [
+        `/?access=${accessToken}&access=${accessToken}`,
+        `/?access=${accessToken}&extra=1`,
+        "/?other=1",
+        `/?access=${createShareAccessToken()}`,
+        `/api/sessions?access=${accessToken}`,
+      ];
+      for (const target of malformed) {
+        const response = await fetch(new URL(target, server.url), { headers: { cookie } });
+        expect(response.status, target).toBe(401);
+      }
+
+      expect((await fetch(server.url, { headers: { cookie } })).status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects duplicate or URL-encoded capability cookies", async () => {
+    const accessToken = createShareAccessToken();
+    const server = await startShareServer({ accessToken, idleTimeoutMs: null });
+    try {
+      const name = shareCookieName(Number(new URL(server.url).port));
+      const duplicate = `${name}=${accessToken}; ${name}=${accessToken}`;
+      expect((await fetch(server.url, { headers: { cookie: duplicate } })).status).toBe(401);
+
+      const encoded = `${name}=${accessToken.replace(/[A-Za-z]/, (character) =>
+        `%${character.charCodeAt(0).toString(16)}`,
+      )}`;
+      expect((await fetch(server.url, { headers: { cookie: encoded } })).status).toBe(401);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("requires the exact loopback Host before bootstrap or cookie checks", async () => {
+    const accessToken = createShareAccessToken();
+    const server = await startShareServer({ accessToken, idleTimeoutMs: null });
+    try {
+      const port = Number(new URL(server.url).port);
+      const response = await responseHeadForRawRequest(
+        port,
+        `GET /?access=${accessToken} HTTP/1.1\r\nHost: localhost:${port}\r\nConnection: close\r\n\r\n`,
+      );
+      expect(response).toMatch(/^HTTP\/1\.1 400 /);
+      expect(response).not.toContain(accessToken);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("checks cookie before POST Origin and accepts only the exact loopback Origin", async () => {
+    const accessToken = createShareAccessToken();
+    const server = await startShareServer({
+      accessToken,
+      idleTimeoutMs: null,
+      configHome: await tempHome(),
+    });
+    try {
+      const { cookie } = await bootstrapCookie(server.entryUrl);
+      const endpoint = new URL("/api/config", server.url);
+      const body = JSON.stringify({ sessionListLimit: 10 });
+
+      const noCookieWrongOrigin = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://evil.example" },
+        body,
+      });
+      expect(noCookieWrongOrigin.status).toBe(401);
+
+      for (const origin of [undefined, "https://evil.example", server.url, "http://localhost:1"]) {
+        const headers: Record<string, string> = { cookie, "content-type": "application/json" };
+        if (origin !== undefined) headers.origin = origin;
+        const response = await fetch(endpoint, { method: "POST", headers, body: "{" });
+        expect(response.status, String(origin)).toBe(403);
+      }
+
+      const expectedOrigin = server.url.slice(0, -1);
+      const allowed = await fetch(endpoint, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json", origin: expectedOrigin },
+        body,
+      });
+      expect(allowed.status).toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("returns 401 without reading a declared huge POST body", async () => {
+    const server = await startShareServer({ accessToken: createShareAccessToken(), idleTimeoutMs: null });
+    try {
+      const port = Number(new URL(server.url).port);
+      const response = await responseHeadForRawRequest(
+        port,
+        "POST /api/export HTTP/1.1\r\n" +
+          `Host: 127.0.0.1:${port}\r\n` +
+          `Origin: http://127.0.0.1:${port}\r\n` +
+          "Content-Type: application/json\r\n" +
+          "Content-Length: 999999999\r\n" +
+          "Connection: close\r\n\r\n",
+      );
+      expect(response).toMatch(/^HTTP\/1\.1 401 /);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not refresh idle time for an unauthenticated request", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const server = await startShareServer({ accessToken: createShareAccessToken(), idleTimeoutMs: 100 });
+    try {
+      await vi.advanceTimersByTimeAsync(60);
+      expect((await fetch(server.url)).status).toBe(401);
+      await vi.advanceTimersByTimeAsync(40);
+      await expect(server.closed).resolves.toBeUndefined();
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("does not write the configured capability into server errors", async () => {
+    const accessToken = createShareAccessToken();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const server = await startShareServer({ accessToken, idleTimeoutMs: null });
+    try {
+      const { cookie } = await bootstrapCookie(server.entryUrl);
+      const response = await fetch(new URL("/api/export", server.url), {
+        method: "POST",
+        headers: {
+          cookie,
+          "content-type": "application/json",
+          origin: server.url.slice(0, -1),
+        },
+        body: "{",
+      });
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain(accessToken);
+      expect(error.mock.calls.flat().join("\n")).not.toContain(accessToken);
+    } finally {
+      await server.close();
+      error.mockRestore();
     }
   });
 });

@@ -24,6 +24,13 @@ import {
   type Locale,
 } from "../i18n/index.js";
 import { detectSystemLocale, type SystemLocaleResult } from "../i18n/system.js";
+import {
+  isAllowedOrigin,
+  isValidShareAccessToken,
+  readCookie,
+  shareCookieName,
+  tokensEqual,
+} from "./share-access.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
@@ -322,10 +329,24 @@ function readBody(req: IncomingMessage, locale: Locale): Promise<string> {
   });
 }
 
-function sendJson(res: ServerResponse, status: number, obj: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  obj: unknown,
+  headers: Record<string, string> = {},
+): void {
   const buf = Buffer.from(JSON.stringify(obj), "utf8");
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": buf.length });
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": buf.length,
+    ...headers,
+  });
   res.end(buf);
+}
+
+function sendAccessError(res: ServerResponse, status: 400 | 401 | 403, code: string): void {
+  res.shouldKeepAlive = false;
+  sendJson(res, status, { ok: false, code }, { "cache-control": "no-store", connection: "close" });
 }
 
 export interface ShareServer {
@@ -340,6 +361,7 @@ export interface ShareServerOptions {
   port?: number;
   defaultSession?: string;
   idleTimeoutMs?: number | null;
+  accessToken?: string;
   locale?: Locale;
   languagePreference?: LanguagePreference;
   configHome?: string;
@@ -355,6 +377,9 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
       opts.idleTimeoutMs > MAX_TIMER_DELAY_MS)
   ) {
     throw new TypeError(`idleTimeoutMs must be between 1 and ${MAX_TIMER_DELAY_MS}, null, or undefined`);
+  }
+  if (opts.accessToken !== undefined && !isValidShareAccessToken(opts.accessToken)) {
+    throw new TypeError("accessToken must be a canonical 32-byte base64url capability");
   }
 
   let locale = opts.locale ?? "zh-CN";
@@ -413,7 +438,6 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
   };
 
   server = createServer((req, res) => {
-    touch();
     const requestLocale = locale;
     const requestI18n = i18n;
     const requestLanguagePreference = languagePreference;
@@ -430,23 +454,93 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
     requestI18n: I18n,
     requestLanguagePreference: LanguagePreference,
   ): Promise<void> {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    const p = url.pathname;
+    const requestTarget = req.url ?? "/";
+    if (opts.accessToken !== undefined && !requestTarget.startsWith("/")) {
+      sendAccessError(res, 400, "INVALID_REQUEST_TARGET");
+      return;
+    }
 
-    if (req.method === "GET" && p === "/") {
+    let url: URL;
+    try {
+      url = new URL(requestTarget, "http://127.0.0.1");
+    } catch (error) {
+      if (opts.accessToken === undefined) throw error;
+      sendAccessError(res, 400, "INVALID_REQUEST_TARGET");
+      return;
+    }
+    const p = url.pathname;
+    const method = req.method ?? "";
+
+    if (opts.accessToken !== undefined) {
+      const address = server.address();
+      if (typeof address !== "object" || address === null) {
+        sendAccessError(res, 401, "UNAUTHORIZED");
+        return;
+      }
+      const expectedHost = `127.0.0.1:${address.port}`;
+      const expectedOrigin = `http://${expectedHost}`;
+
+      if (req.headers.host !== expectedHost) {
+        sendAccessError(res, 400, "INVALID_HOST");
+        return;
+      }
+
+      if (method === "GET" && p === "/" && url.search !== "") {
+        const entries = [...url.searchParams.entries()];
+        const bootstrapShapeIsValid =
+          /^\?access=[A-Za-z0-9_-]{43}$/.test(url.search) &&
+          entries.length === 1 &&
+          entries[0]?.[0] === "access";
+        const suppliedToken = entries[0]?.[1];
+        if (!bootstrapShapeIsValid || !tokensEqual(suppliedToken, opts.accessToken)) {
+          sendAccessError(res, 401, "UNAUTHORIZED");
+          return;
+        }
+
+        res.writeHead(303, {
+          location: "/",
+          "set-cookie": `${shareCookieName(address.port)}=${opts.accessToken}; HttpOnly; SameSite=Strict; Path=/`,
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+          "content-length": "0",
+        });
+        res.end();
+        return;
+      }
+
+      if (url.searchParams.has("access")) {
+        sendAccessError(res, 401, "UNAUTHORIZED");
+        return;
+      }
+
+      const cookieToken = readCookie(req.headers.cookie, shareCookieName(address.port));
+      if (!tokensEqual(cookieToken, opts.accessToken)) {
+        sendAccessError(res, 401, "UNAUTHORIZED");
+        return;
+      }
+
+      if (method === "POST" && !isAllowedOrigin(req.headers.origin, expectedOrigin)) {
+        sendAccessError(res, 403, "INVALID_ORIGIN");
+        return;
+      }
+    }
+
+    touch();
+
+    if (method === "GET" && p === "/") {
       const html = renderPage(opts.defaultSession, toolDisplay, isMac, requestLocale, requestLanguagePreference);
       const buf = Buffer.from(html, "utf8");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-length": buf.length });
       res.end(buf);
       return;
     }
-    if (req.method === "GET" && p === "/api/sessions") {
+    if (method === "GET" && p === "/api/sessions") {
       // ?ensure=<id>：前端焦点刷新时保证「当前正在看的会话」始终在列表里（可能比 limit 老）
       const ensure = url.searchParams.get("ensure") ?? opts.defaultSession;
       sendJson(res, 200, { sessions: await listSessions(listLimit, ensure ?? undefined), limit: listLimit });
       return;
     }
-    if (req.method === "POST" && p === "/api/config") {
+    if (method === "POST" && p === "/api/config") {
       const parsedBody: unknown = JSON.parse(await readBody(req, requestLocale));
       if (typeof parsedBody !== "object" || parsedBody === null || Array.isArray(parsedBody)) {
         sendJson(res, 400, {
@@ -521,7 +615,7 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
       }
       return;
     }
-    if (req.method === "GET" && p.startsWith("/api/session/")) {
+    if (method === "GET" && p.startsWith("/api/session/")) {
       const id = decodeURIComponent(p.slice("/api/session/".length));
       const detail = await loadDetail(id, parseToolDisplay(url.searchParams.get("tools")), requestLocale);
       if (!detail) {
@@ -531,7 +625,7 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
       sendJson(res, 200, detail);
       return;
     }
-    if (req.method === "POST" && p === "/api/export") {
+    if (method === "POST" && p === "/api/export") {
       const body = JSON.parse(await readBody(req, requestLocale)) as ExportBody;
       const result = await handleExport(body, requestLocale);
       if (result.ok && result.bytes) {
@@ -547,7 +641,7 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
       sendJson(res, status, { ok: result.ok, blocked: result.blocked, code: result.code, message: result.message });
       return;
     }
-    if (req.method === "POST" && p === "/api/close") {
+    if (method === "POST" && p === "/api/close") {
       res.once("finish", () => void close());
       sendJson(res, 200, { ok: true });
       return;
@@ -560,7 +654,7 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
   const url = `http://127.0.0.1:${port}/`;
   return {
     url,
-    entryUrl: url,
+    entryUrl: opts.accessToken === undefined ? url : `${url}?access=${opts.accessToken}`,
     closed,
     isClosed: () => closedState,
     close,
