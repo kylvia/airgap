@@ -14,6 +14,9 @@ export interface DesktopSmokeResult {
   authenticatedRedirect: boolean;
   nodeGlobalsAbsent: boolean;
   sessionsDiscovered: boolean;
+  settingsDialogOpened: boolean;
+  settingsDialogClosed: boolean;
+  settingsFocusRestored: boolean;
   conversationChanged: boolean;
   turnSelected: boolean;
   rawIdsHidden: boolean;
@@ -134,6 +137,9 @@ function createInitialResult(appVersion: string): DesktopSmokeResult {
     authenticatedRedirect: false,
     nodeGlobalsAbsent: false,
     sessionsDiscovered: false,
+    settingsDialogOpened: false,
+    settingsDialogClosed: false,
+    settingsFocusRestored: false,
     conversationChanged: false,
     turnSelected: false,
     rawIdsHidden: false,
@@ -179,6 +185,45 @@ export async function runDesktopSmoke(dependencies: DesktopSmokeDependencies): P
 
     const currentUrl = new URL(dependencies.window.webContents.getURL());
     dependencies.logOrigin?.(currentUrl.origin);
+
+    stage = "settings-dialog";
+    const settingsState = await dependencies.window.webContents.executeJavaScript<{
+      opened: boolean;
+      busyStarted: boolean;
+      closed: boolean;
+    }>(`(() => {
+      const button = document.querySelector('[data-testid="settings"]');
+      const panel = document.getElementById('prefpanel');
+      const limit = document.getElementById('limit');
+      if (!(button instanceof HTMLButtonElement) ||
+          !(panel instanceof HTMLDialogElement) ||
+          !(limit instanceof HTMLSelectElement)) {
+        return { opened: false, busyStarted: false, closed: false };
+      }
+      button.click();
+      const opened = panel.open && document.activeElement === panel;
+      const target = [...limit.options].find((option) => option.value !== limit.value);
+      if (!opened || !target) return { opened, busyStarted: false, closed: false };
+      limit.value = target.value;
+      limit.dispatchEvent(new Event('change', { bubbles: true }));
+      const busyStarted = button.disabled;
+      panel.click();
+      return { opened, busyStarted, closed: !panel.open };
+    })()`);
+    result.settingsDialogOpened = settingsState.opened;
+    result.settingsDialogClosed = settingsState.closed;
+    if (!settingsState.opened || !settingsState.busyStarted || !settingsState.closed) {
+      throw new Error("settings dialog check failed");
+    }
+    result.settingsFocusRestored = await poll(
+      () => dependencies.window.webContents.executeJavaScript<boolean>(`(() => {
+        const button = document.querySelector('[data-testid="settings"]');
+        return button instanceof HTMLButtonElement &&
+          !button.disabled && document.activeElement === button;
+      })()`),
+      Boolean,
+    );
+    result.lifecycleEvents.push("settings-dialog");
 
     stage = "conversation-selected";
     const selectionStarted = await dependencies.window.webContents.executeJavaScript<boolean>(`(() => {

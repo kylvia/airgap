@@ -162,6 +162,9 @@ smokeTest("runs the real secure Share window from discovery through shutdown", a
     authenticatedRedirect: true,
     nodeGlobalsAbsent: true,
     sessionsDiscovered: true,
+    settingsDialogOpened: true,
+    settingsDialogClosed: true,
+    settingsFocusRestored: true,
     conversationChanged: true,
     turnSelected: true,
     rawIdsHidden: true,
@@ -176,6 +179,7 @@ smokeTest("runs the real secure Share window from discovery through shutdown", a
   expect(result["lifecycleEvents"]).toEqual([
     "ready",
     "authenticated",
+    "settings-dialog",
     "conversation-selected",
     "turn-selected",
     "text-exported",
@@ -197,6 +201,9 @@ smokeTest("runs the real secure Share window from discovery through shutdown", a
     "secondInstanceObserved",
     "secondLaunchExited",
     "sessionsDiscovered",
+    "settingsDialogClosed",
+    "settingsDialogOpened",
+    "settingsFocusRestored",
     "textClipboardBytes",
     "turnSelected",
   ].sort());
