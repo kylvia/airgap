@@ -23,6 +23,7 @@ export const en = {
   "share.page.copyResume": "Click to copy the full resume command",
   "share.page.settings": "Settings (writes to ~/.airgap/config.json)",
   "share.page.settingsAria": "Settings",
+  "share.page.closeSettings": "Close settings",
   "share.page.language": "Language",
   "share.page.language.auto": "Follow system",
   "share.page.language.en": "English",

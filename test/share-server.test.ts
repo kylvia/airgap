@@ -121,6 +121,17 @@ describe("exportBlockReason (share server-side export gate)", () => {
 describe("renderPage (share picker shell)", () => {
   const page = renderPage();
 
+  it("renders settings as one accessible modal dialog on both surfaces", () => {
+    for (const surface of ["browser", "desktop"] as const) {
+      const rendered = renderPage(undefined, "summary", true, "en", "en", surface, "0.3.0");
+      expect(rendered).toContain('<dialog id="prefpanel" tabindex="-1" aria-labelledby="settings-title">');
+      expect(rendered).toContain('<h2 id="settings-title">Settings</h2>');
+      expect(rendered).toContain('id="prefclose"');
+      expect(rendered).toContain('aria-label="Close settings"');
+      expect(rendered).toContain('aria-expanded="false" aria-controls="prefpanel"');
+    }
+  });
+
   it("loading overlay 锚点在位：切会话/切档时盖住内容区，动画尊重 reduced-motion", () => {
     expect(page).toContain('id="loading"');
     expect(page).toContain("gap-pulse");
@@ -324,15 +335,27 @@ describe("renderPage desktop surface", () => {
     expect(browser).toContain('<a id="all">Select all</a><a id="none">Clear</a>');
   });
 
-  it("announces status, focuses surfaced errors, and exposes settings state", () => {
+  it("announces status and focuses surfaced errors", () => {
     expect(page).toContain('id="status" role="status" aria-live="polite"');
     expect(page).toContain('id="empty-state" data-testid="empty-state" tabindex="-1"');
     expect(page).toContain("state.focus()");
+  });
+
+  it("opens and closes the modal while restoring settings-button focus", () => {
     expect(page).toContain('aria-expanded="false" aria-controls="prefpanel"');
-    expect(page).toContain("function setPreferencesOpen(open, restoreFocus)");
-    expect(page).toContain('button.setAttribute("aria-expanded", String(open))');
-    expect(page).toContain("if (restoreFocus) button.focus()");
-    expect(page).toContain('if (e.key === "Escape" && !$("prefpanel").hidden) setPreferencesOpen(false, true)');
+    expect(page).toContain("function openPreferences() {");
+    expect(page).toContain("panel.showModal()");
+    expect(page).toContain("panel.focus()");
+    expect(page).toContain('button.setAttribute("aria-expanded", "true")');
+    expect(page).toContain("function closePreferences() {");
+    expect(page).toContain("if (panel.open) panel.close()");
+    expect(page).toContain('$("prefclose").onclick = closePreferences');
+    expect(page).toContain("if (event.target === panel) closePreferences()");
+    expect(page).toContain('panel.addEventListener("close", () => {');
+    expect(page).toContain('button.setAttribute("aria-expanded", "false")');
+    expect(page).toContain("button.focus()");
+    expect(page).not.toContain("setPreferencesOpen(");
+    expect(page).not.toContain('document.addEventListener("click"');
   });
 
   it("starts desktop picker and export actions disabled and restores them from shared state", () => {

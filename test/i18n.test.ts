@@ -154,6 +154,7 @@ describe("createI18n", () => {
       "share.desktop.refreshListFailed",
       "share.desktop.refreshFailed",
       "share.desktop.loadFailed",
+      "share.page.closeSettings",
     ] as const;
 
     for (const key of keys) {
@@ -162,5 +163,7 @@ describe("createI18n", () => {
     }
     expect(en.t("share.desktop.redaction")).toContain("possible secrets");
     expect(zh.t("share.desktop.copyText")).toBe("复制文本");
+    expect(en.t("share.page.closeSettings")).toBe("Close settings");
+    expect(zh.t("share.page.closeSettings")).toBe("关闭设置");
   });
 });

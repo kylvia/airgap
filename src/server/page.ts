@@ -81,8 +81,6 @@ export function renderPage(
   const desktopCss = isDesktop ? `
   body[data-surface="desktop"] header { padding: 15px 22px; }
   body[data-surface="desktop"] header select { min-width: 260px; max-width: min(42vw, 440px); }
-  body[data-surface="desktop"] #prefpanel { width: 310px; padding: 8px 16px 12px; }
-  body[data-surface="desktop"] #prefpanel h2 { font-family: var(--font-serif); font-size: 18px; font-weight: 600; letter-spacing: -0.02em; padding: 8px 0; }
   body[data-surface="desktop"] #prefpanel details { border-top: 1px solid var(--border-subtle); padding: 10px 0 2px; }
   body[data-surface="desktop"] #prefpanel summary { cursor: pointer; font-size: 13px; font-weight: 500; }
   body[data-surface="desktop"] #prefpanel .about { border-top: 1px solid var(--border-subtle); margin-top: 10px; padding-top: 10px; }
@@ -108,10 +106,9 @@ export function renderPage(
   const sidMarkup = isDesktop
     ? ""
     : `<span id="sid" style="display:none" title="${escapeHtml(t("share.page.copyResume"))}"></span>`;
-  const settingsMarkup = isDesktop
-    ? `<div id="prefpanel" hidden>
-      <h2>${escapeHtml(t("share.desktop.settings"))}</h2>
-      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language" aria-label="${escapeHtml(t("share.page.language"))}">${languageOptions}</select></div>
+  const settingsTitle = t(isDesktop ? "share.desktop.settings" : "share.page.settingsAria");
+  const settingsBody = isDesktop
+    ? `<div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language" aria-label="${escapeHtml(t("share.page.language"))}">${languageOptions}</select></div>
       <details><summary>${escapeHtml(t("share.desktop.advanced"))}</summary>
         <div class="prow"><span>${escapeHtml(t("share.desktop.conversationList"))}</span><select id="limit" aria-label="${escapeHtml(t("share.desktop.sessionListLabel"))}">
           <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
@@ -125,17 +122,23 @@ export function renderPage(
         ${appVersion ? `<p>${escapeHtml(t("share.desktop.version", { version: appVersion }))}</p>` : ""}
         <p><a href="https://github.com/kylvia/airgap" target="_blank" rel="noreferrer">${escapeHtml(t("share.desktop.repository"))}</a></p>
         <p><a href="https://github.com/kylvia/airgap/releases" target="_blank" rel="noreferrer">${escapeHtml(t("share.desktop.downloadPage"))}</a></p>
-      </section>
-    </div>`
-    : `<div id="prefpanel" hidden>
-      <div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit">
+      </section>`
+    : `<div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit">
         <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
         <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
         <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
       </select></div>
       <div class="prow"><span>${escapeHtml(t("share.page.toolDisplay"))}</span><select id="tools">${toolsOptions}</select></div>
-      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>
-    </div>`;
+      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>`;
+  const settingsMarkup = `<dialog id="prefpanel" tabindex="-1" aria-labelledby="settings-title">
+    <div class="settings-sheet">
+      <div class="settings-head">
+        <h2 id="settings-title">${escapeHtml(settingsTitle)}</h2>
+        <button type="button" id="prefclose" aria-label="${escapeHtml(t("share.page.closeSettings"))}">${escapeHtml(t("share.page.closeSettings"))}</button>
+      </div>
+      ${settingsBody}
+    </div>
+  </dialog>`;
   const emptyStateMarkup = isDesktop
     ? `<section class="empty-state" id="empty-state" data-testid="empty-state" tabindex="-1" aria-labelledby="empty-title" hidden>
       <div class="empty-card">
@@ -215,7 +218,7 @@ ${THEME_CSS}
   header #refresh:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   header #refresh:disabled { cursor: wait; opacity: 0.48; }
 ${sidCss}
-  /* 设置入口 + popover：实色 paper 面板（铁律禁半透明材质），hairline 边框方角卡片 */
+  /* 设置入口 + 居中模态框：实色 paper 面板、hairline 边框和轻遮罩 */
   header #prefs { margin-left: auto; width: 34px; height: 34px; flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
     border: 1px solid var(--border); border-radius: var(--radius-input);
@@ -223,12 +226,22 @@ ${sidCss}
     transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
   header #prefs:hover { border-color: var(--border-strong); background: var(--bg-hover); }
   header #prefs:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-  #prefpanel { position: absolute; top: calc(100% + 8px); right: 20px; z-index: 20; min-width: 250px;
-    background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-card);
-    padding: 6px 14px; }
-  #prefpanel[hidden] { display: none; }
+  #prefpanel { width: min(440px, calc(100vw - 32px)); max-height: min(680px, calc(100vh - 32px));
+    margin: auto; padding: 0; overflow: auto; color: var(--fg); background: var(--bg);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-card); }
+  #prefpanel:not([open]) { display: none; }
+  #prefpanel::backdrop { background: rgba(26, 24, 20, 0.28); }
+  #prefpanel .settings-sheet { padding: 18px 20px 20px; }
+  #prefpanel .settings-head { display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle); }
+  #prefpanel .settings-head h2 { font-family: var(--font-serif); font-size: 21px; font-weight: 600;
+    letter-spacing: -0.02em; }
+  #prefpanel #prefclose { border: 0; border-radius: var(--radius-button); padding: 6px 8px;
+    background: transparent; color: var(--fg-muted); font: 500 12px var(--font-sans); cursor: pointer; }
+  #prefpanel #prefclose:hover { color: var(--fg); background: var(--bg-hover); }
+  #prefpanel #prefclose:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   #prefpanel .prow { display: flex; align-items: center; justify-content: space-between; gap: 18px;
-    padding: 9px 0; font-size: 13px; color: var(--fg); }
+    min-height: 48px; font-size: 13px; color: var(--fg); }
   #prefpanel .prow + .prow { border-top: 1px solid var(--border-subtle); }
   main { flex: 1; display: flex; min-height: 0; position: relative; }
   /* 切换会话/展示级别时盖住内容区：实色纸面（铁律禁半透明材质），品牌 mark 两块交替脉动。
@@ -289,7 +302,7 @@ ${desktopCss}
     <select id="sess"${testId("conversation-picker")}${isDesktop ? ` aria-label="${escapeHtml(t("share.desktop.conversationPicker"))}" disabled` : ""}></select>
     <button id="refresh"${testId("refresh")} title="${escapeHtml(t(isDesktop ? "share.desktop.recheck" : "share.page.refresh"))}" aria-label="${escapeHtml(t(isDesktop ? "share.desktop.recheck" : "share.page.refresh"))}">${refreshMark}</button>
     ${sidMarkup}
-    <button id="prefs"${testId("settings")}${isDesktop ? ' aria-expanded="false" aria-controls="prefpanel"' : ""} title="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settings"))}" aria-label="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settingsAria"))}">${prefsMark}</button>
+    <button id="prefs"${testId("settings")} aria-expanded="false" aria-controls="prefpanel" title="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settings"))}" aria-label="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settingsAria"))}">${prefsMark}</button>
     ${settingsMarkup}
   </header>
   <div class="sbanner" id="sbanner"></div>
@@ -766,17 +779,29 @@ for (const btn of document.querySelectorAll("footer button[data-a]")) {
 }
 $("all").onclick = () => { if (!detail || interactionBusy()) return; for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
 $("none").onclick = () => { if (!detail || interactionBusy()) return; selected.clear(); renderList(); updateCount(); syncPreview(null); };
-// 设置面板开关：点按钮 toggle；点面板外或按 Esc 关闭（面板内点击冒泡到 document 时被 contains 放行）。
-function setPreferencesOpen(open, restoreFocus) {
-  const panel = $("prefpanel");
-  const button = $("prefs");
-  panel.hidden = !open;
-  if (SURFACE === "desktop") button.setAttribute("aria-expanded", String(open));
-  if (restoreFocus) button.focus();
+const panel = $("prefpanel");
+const button = $("prefs");
+
+function openPreferences() {
+  if (panel.open || interactionBusy()) return;
+  panel.showModal();
+  button.setAttribute("aria-expanded", "true");
+  panel.focus();
 }
-$("prefs").onclick = (e) => { if (interactionBusy()) return; e.stopPropagation(); setPreferencesOpen($("prefpanel").hidden, false); };
-document.addEventListener("click", (e) => { const p = $("prefpanel"); if (!p.hidden && !p.contains(e.target)) setPreferencesOpen(false, false); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("prefpanel").hidden) setPreferencesOpen(false, true); });
+
+function closePreferences() {
+  if (panel.open) panel.close();
+}
+
+button.onclick = openPreferences;
+$("prefclose").onclick = closePreferences;
+panel.onclick = (event) => {
+  if (event.target === panel) closePreferences();
+};
+panel.addEventListener("close", () => {
+  button.setAttribute("aria-expanded", "false");
+  button.focus();
+});
 // 切换工具展示级别：服务端按新级别重渲各轮片段（预览=导出，物理裁剪而非 CSS 隐藏），保留已勾选轮次；
 // 同时静默持久化到 config.json——先等预览刷新（用户在等它），保存失败的提示最后落地不被刷新提示覆盖。
 $("tools").onchange = async () => {

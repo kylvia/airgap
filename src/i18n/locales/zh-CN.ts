@@ -25,6 +25,7 @@ export const zhCN = {
   "share.page.copyResume": "点击复制 resume 命令（含完整会话 id）",
   "share.page.settings": "设置（写入 ~/.airgap/config.json）",
   "share.page.settingsAria": "设置",
+  "share.page.closeSettings": "关闭设置",
   "share.page.language": "语言",
   "share.page.language.auto": "跟随系统",
   "share.page.language.en": "英文",
