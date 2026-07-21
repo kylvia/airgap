@@ -17,6 +17,7 @@ export interface DesktopSmokeResult {
   settingsDialogOpened: boolean;
   settingsBackdropInputSent: boolean;
   settingsDialogClosed: boolean;
+  settingsInteractionSettled: boolean;
   settingsFocusRestored: boolean;
   conversationChanged: boolean;
   turnSelected: boolean;
@@ -148,6 +149,7 @@ function createInitialResult(appVersion: string): DesktopSmokeResult {
     settingsDialogOpened: false,
     settingsBackdropInputSent: false,
     settingsDialogClosed: false,
+    settingsInteractionSettled: false,
     settingsFocusRestored: false,
     conversationChanged: false,
     turnSelected: false,
@@ -294,13 +296,23 @@ export async function runDesktopSmoke(dependencies: DesktopSmokeDependencies): P
       })()`),
       Boolean,
     );
+    result.settingsInteractionSettled = await poll(
+      () => dependencies.window.webContents.executeJavaScript<boolean>(`(() => {
+        const panel = document.getElementById('prefpanel');
+        const button = document.querySelector('[data-testid="settings"]');
+        return panel instanceof HTMLDialogElement && !panel.open &&
+          button instanceof HTMLButtonElement && !button.disabled;
+      })()`),
+      Boolean,
+      15_000,
+    );
     result.settingsFocusRestored = await poll(
       () => dependencies.window.webContents.executeJavaScript<boolean>(`(() => {
         const button = document.querySelector('[data-testid="settings"]');
-        return button instanceof HTMLButtonElement &&
-          !button.disabled && document.activeElement === button;
+        return button instanceof HTMLButtonElement && document.activeElement === button;
       })()`),
       Boolean,
+      2_000,
     );
     result.lifecycleEvents.push("settings-dialog");
 
