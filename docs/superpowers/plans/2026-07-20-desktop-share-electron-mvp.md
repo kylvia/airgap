@@ -73,6 +73,7 @@ Confirm each package is from the official Electron GitHub organization and has b
 
 **Files:**
 - Create: `apps/desktop/src/app-controller.ts`
+- Create: `apps/desktop/src/startup-error.ts`
 - Create: `apps/desktop/test/app-controller.test.ts`
 - Create: `apps/desktop/vitest.config.ts`
 
@@ -87,6 +88,9 @@ export interface DesktopWindow {
   isDestroyed(): boolean;
   once(event: "ready-to-show" | "closed", listener: () => void): void;
   loadURL(url: string): Promise<void>;
+  setAllowedOrigin(origin: string): void;
+  clearNavigationHistory(): void;
+  showStartupError(actions: { retry(): void; quit(): void }): Promise<void>;
 }
 
 export interface DesktopRuntime {
@@ -98,11 +102,13 @@ export interface DesktopRuntime {
 }
 ```
 
-- [ ] Write failing tests for first launch, second-launch focus, service startup failure with retry/quit actions, last-window shutdown, and simultaneous retry/close. Assert exactly one service and one window exist at any time.
-- [ ] Include a shutdown-order test that records `server.close`, `server.whenExportsIdle`, `window closed`, and `runtime.quit`; require the service port to be released and in-flight exports to settle before `quit()`.
+- [ ] Add a synchronous `AppController.acquire()` entry point as the single owner of `acquireSingleInstanceLock()` and the `second-instance` listener. A failed lock quits immediately and creates neither a server nor a window; `main.ts` must not acquire the lock a second time.
+- [ ] Write failing tests for first launch, second-launch focus, service startup failure with retry/quit actions, last-window shutdown, and simultaneous retry/close. Assert exactly one service and one window exist at any time. Cover `loadURL` plus `ready-to-show` ordering, hidden-window second-instance focus, and navigation-history clearing after the bootstrap redirect.
+- [ ] Render the startup failure as a bundled local document from `startup-error.ts`; expose Retry/Quit through the injected window port so tests do not need Electron globals or a preload bridge. A healthy server whose page load failed is reused on Retry rather than duplicated.
+- [ ] Include a shutdown-order test that records `server.close`, both `server.whenExportsIdle` barriers, `window closed`, and `runtime.quit`; require the service port to be released and in-flight exports to settle before `quit()` even if close rejects.
 - [ ] Run `npm run desktop:test -- app-controller.test.ts` and confirm failures.
 - [ ] Implement an explicit state machine with states `starting`, `ready`, `closing`, and `closed`. Cache the startup and shutdown promises so reentrant calls share one operation.
-- [ ] On shutdown, start `server.close()` first so no new export request can enter, then await it together with `server.whenExportsIdle()` before calling `runtime.quit()`.
+- [ ] On shutdown, start `server.close()` first so no new export request can enter, await it together with the first `server.whenExportsIdle()`, then run `server.whenExportsIdle()` once more as a terminal barrier before calling `runtime.quit()`.
 - [ ] Start the shared server with exactly these desktop policies:
 
 ```ts
@@ -115,7 +121,7 @@ await startShareServer({
 });
 ```
 
-- [ ] Load only `server.entryUrl`, wait for `ready-to-show`, then show the window. A failed load must display a packaged local error document with Retry and Quit instead of a blank window.
+- [ ] Set the exact allowed loopback Origin from `server.url`, load only `server.entryUrl`, wait for `ready-to-show`, clear the bootstrap navigation history, then show the window. A failed load must display the bundled local error document with Retry and Quit instead of a blank window.
 - [ ] Run the focused tests and confirm all lifecycle and order assertions pass.
 - [ ] Commit only the three task files with `feat: add desktop lifecycle controller`.
 
@@ -141,7 +147,7 @@ webPreferences: {
 
 - [ ] Add tests that allow only the exact active loopback Origin in the application window. `will-navigate` and `setWindowOpenHandler` must deny every other destination. The repository and Releases URLs may be passed to `shell.openExternal()` only after an explicit click; all other external URLs are rejected.
 - [ ] Run `npm run desktop:test -- electron-runtime.test.ts` and confirm failure before the runtime exists.
-- [ ] In `main.ts`, call `app.requestSingleInstanceLock()` before `app.whenReady()`. Quit immediately when it returns false; otherwise register `second-instance` to restore and focus the existing window.
+- [ ] In `main.ts`, synchronously construct the controller through its single-instance `acquire()` path before `app.whenReady()`. Quit immediately when it returns null; otherwise call `start()` after readiness. Do not call `app.requestSingleInstanceLock()` separately in `main.ts`.
 - [ ] Set the application name to `Airgap`, create a single 1180×780 window with minimum size 960×640, hide it until ready, and do not create a tray, login item, daemon, global shortcut, or macOS window-reopen behavior.
 - [ ] Handle `window-all-closed` by invoking the controller shutdown on every platform, including macOS. Do not leave the server alive for the usual macOS dock behavior.
 - [ ] Register `render-process-gone` and failed-load handling so a renderer crash or startup error reaches the stable local error surface and eventual shutdown.
