@@ -19,11 +19,21 @@ export interface DesktopRuntime {
   onSecondInstance(listener: () => void): void;
   createWindow(): DesktopWindow;
   getVersion(): string;
+  reportError(error: unknown, phase: DesktopFailurePhase): void;
+  showFatalError(actions: { retry(): void; quit(): void }): Promise<void>;
   quit(): void;
 }
 
 export type StartDesktopShareServer = (options: ShareServerOptions) => Promise<ShareServer>;
 export type AppControllerState = "starting" | "ready" | "closing" | "closed";
+export type DesktopFailurePhase =
+  | "startup"
+  | "startup-error-surface"
+  | "fatal-error-surface"
+  | "shutdown-close"
+  | "shutdown-first-idle"
+  | "shutdown-pending-attempt"
+  | "shutdown-final-idle";
 
 export interface AppControllerDependencies {
   runtime: DesktopRuntime;
@@ -63,6 +73,7 @@ export class AppController {
   private attemptPromise: Promise<void> | undefined;
   private shutdownPromise: Promise<void> | undefined;
   private focusRequested = false;
+  private surfaceReady = false;
   private readonly closingSignal: Promise<void>;
   private resolveClosing!: () => void;
 
@@ -98,14 +109,13 @@ export class AppController {
     window.once("closed", () => {
       void this.shutdown();
     });
-    if (this.focusRequested) this.focusExistingWindow();
     return window;
   }
 
   private focusExistingWindow(): void {
     if (this.stateValue === "closing" || this.stateValue === "closed") return;
     const window = this.window;
-    if (!window || window.isDestroyed()) {
+    if (!window || window.isDestroyed() || !this.surfaceReady) {
       this.focusRequested = true;
       return;
     }
@@ -113,6 +123,30 @@ export class AppController {
     if (window.isMinimized()) window.restore();
     window.show();
     window.focus();
+  }
+
+  private revealReadySurface(window: DesktopWindow): void {
+    const shouldFocus = this.focusRequested;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    if (shouldFocus) window.focus();
+    this.surfaceReady = true;
+    this.focusRequested = false;
+  }
+
+  private errorActions(): { retry(): void; quit(): void } {
+    return {
+      retry: () => {
+        void this.retry().catch((error: unknown) => {
+          this.dependencies.runtime.reportError(error, "startup");
+        });
+      },
+      quit: () => {
+        void this.shutdown().catch((error: unknown) => {
+          this.dependencies.runtime.reportError(error, "shutdown-close");
+        });
+      },
+    };
   }
 
   private runAttempt(): Promise<void> {
@@ -155,38 +189,68 @@ export class AppController {
       if (!becameReady || this.stateValue !== "starting") return;
 
       window.clearNavigationHistory();
-      window.show();
+      this.revealReadySurface(window);
       this.stateValue = "ready";
-    } catch {
+    } catch (error) {
       if (this.stateValue !== "starting") return;
-      await Promise.race([
-        window.showStartupError({
-          retry: () => {
-            void this.retry();
-          },
-          quit: () => {
-            void this.shutdown();
-          },
-        }),
-        this.closingSignal,
-      ]);
+      this.dependencies.runtime.reportError(error, "startup");
+      const actions = this.errorActions();
+      try {
+        await Promise.race([window.showStartupError(actions), this.closingSignal]);
+        if (this.stateValue !== "starting") return;
+        this.revealReadySurface(window);
+      } catch (surfaceError) {
+        this.dependencies.runtime.reportError(surfaceError, "startup-error-surface");
+        try {
+          await Promise.race([
+            this.dependencies.runtime.showFatalError(actions),
+            this.closingSignal,
+          ]);
+        } catch (fatalError) {
+          this.dependencies.runtime.reportError(fatalError, "fatal-error-surface");
+        }
+      }
     }
   }
 
   private retry(): Promise<void> {
     if (this.stateValue !== "starting") return Promise.resolve();
-    return this.runAttempt();
+    const currentAttempt = this.attemptPromise;
+    if (!currentAttempt) return this.runAttempt();
+    return currentAttempt.then(() => {
+      if (this.stateValue !== "starting") return;
+      return this.runAttempt();
+    });
+  }
+
+  private reportRejected(
+    results: PromiseSettledResult<void>[],
+    phases: DesktopFailurePhase[],
+  ): void {
+    results.forEach((result, index) => {
+      if (result.status === "rejected") {
+        this.dependencies.runtime.reportError(result.reason, phases[index]!);
+      }
+    });
   }
 
   private async drainServer(server: ShareServer, pendingAttempt?: Promise<void>): Promise<void> {
     const close = callAsPromise(() => server.close());
     const firstIdle = callAsPromise(() => server.whenExportsIdle());
-    await Promise.allSettled([
+    const firstResults = await Promise.allSettled([
       close,
       firstIdle,
       ...(pendingAttempt ? [pendingAttempt] : []),
     ]);
-    await Promise.allSettled([callAsPromise(() => server.whenExportsIdle())]);
+    this.reportRejected(firstResults, [
+      "shutdown-close",
+      "shutdown-first-idle",
+      ...(pendingAttempt ? ["shutdown-pending-attempt" as const] : []),
+    ]);
+    const finalResults = await Promise.allSettled([
+      callAsPromise(() => server.whenExportsIdle()),
+    ]);
+    this.reportRejected(finalResults, ["shutdown-final-idle"]);
   }
 
   private async performShutdown(): Promise<void> {

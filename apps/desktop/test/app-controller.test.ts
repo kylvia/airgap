@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import {
   AppController,
+  type DesktopFailurePhase,
   type DesktopRuntime,
   type DesktopWindow,
   type StartDesktopShareServer,
@@ -30,6 +31,7 @@ class FakeWindow implements DesktopWindow {
   readonly loadedUrls: string[] = [];
   errorActions: { retry(): void; quit(): void } | undefined;
   loadFailures = 0;
+  startupErrorFailures = 0;
   autoReady = true;
   minimized = false;
   destroyed = false;
@@ -94,6 +96,10 @@ class FakeWindow implements DesktopWindow {
   }
 
   async showStartupError(actions: { retry(): void; quit(): void }): Promise<void> {
+    if (this.startupErrorFailures > 0) {
+      this.startupErrorFailures -= 1;
+      throw new Error("startup error page failed");
+    }
     this.errorActions = actions;
     this.log.push("window.startup-error");
   }
@@ -104,6 +110,9 @@ class FakeRuntime implements DesktopRuntime {
   quitCalls = 0;
   createWindowCalls = 0;
   secondInstanceListener: (() => void) | undefined;
+  fatalActions: { retry(): void; quit(): void } | undefined;
+  fatalActionMode: "none" | "retry" | "retry-quit" = "none";
+  readonly reportedErrors: Array<{ error: unknown; phase: DesktopFailurePhase }> = [];
   readonly window: FakeWindow;
 
   constructor(readonly log: string[] = []) {
@@ -128,6 +137,20 @@ class FakeRuntime implements DesktopRuntime {
 
   getVersion(): string {
     return "0.3.0-test";
+  }
+
+  reportError(error: unknown, phase: DesktopFailurePhase): void {
+    this.reportedErrors.push({ error, phase });
+    this.log.push(`runtime.report-error:${phase}`);
+  }
+
+  async showFatalError(actions: { retry(): void; quit(): void }): Promise<void> {
+    this.fatalActions = actions;
+    this.log.push("runtime.fatal-error");
+    if (this.fatalActionMode === "retry" || this.fatalActionMode === "retry-quit") {
+      actions.retry();
+    }
+    if (this.fatalActionMode === "retry-quit") actions.quit();
   }
 
   quit(): void {
@@ -240,10 +263,16 @@ describe("AppController", () => {
     const starting = controller!.start();
     await vi.waitFor(() => expect(runtime.window.loadedUrls).toHaveLength(1));
     runtime.secondInstanceListener!();
-    expect(runtime.log.slice(-2)).toEqual(["window.show", "window.focus"]);
+    expect(runtime.log).not.toContain("window.show");
+    expect(runtime.log).not.toContain("window.focus");
 
     runtime.window.emit("ready-to-show");
     await starting;
+    expect(runtime.log.slice(-3)).toEqual([
+      "window.clear-history",
+      "window.show",
+      "window.focus",
+    ]);
     runtime.window.minimized = true;
     runtime.secondInstanceListener!();
     expect(runtime.log.slice(-3)).toEqual(["window.restore", "window.show", "window.focus"]);
@@ -259,11 +288,16 @@ describe("AppController", () => {
     const starting = controller!.start();
     await vi.waitFor(() => expect(runtime.window.loadedUrls).toHaveLength(1));
 
-    expect(runtime.log).toContain("window.show");
-    expect(runtime.log).toContain("window.focus");
+    expect(runtime.log).not.toContain("window.show");
+    expect(runtime.log).not.toContain("window.focus");
     expect(runtime.createWindowCalls).toBe(1);
     runtime.window.emit("ready-to-show");
     await starting;
+    expect(runtime.log.slice(-3)).toEqual([
+      "window.clear-history",
+      "window.show",
+      "window.focus",
+    ]);
   });
 
   test("service startup failure exposes retry and quit actions", async () => {
@@ -286,6 +320,78 @@ describe("AppController", () => {
 
     runtime.window.errorActions!.quit();
     await vi.waitFor(() => expect(controller!.state).toBe("closed"));
+    expect(runtime.quitCalls).toBe(1);
+  });
+
+  test("startup error document failure is reported and falls back to a native error", async () => {
+    const runtime = new FakeRuntime();
+    runtime.window.startupErrorFailures = 1;
+    const startupError = new Error("port unavailable");
+    const { controller } = setup({
+      runtime,
+      startServer: vi.fn<StartDesktopShareServer>().mockRejectedValue(startupError),
+    });
+
+    await controller!.start();
+
+    expect(runtime.reportedErrors.map(({ phase }) => phase)).toEqual([
+      "startup",
+      "startup-error-surface",
+    ]);
+    expect(runtime.reportedErrors[0]?.error).toBe(startupError);
+    expect(runtime.fatalActions).toBeDefined();
+    expect(runtime.log).toContain("runtime.fatal-error");
+  });
+
+  test("retry reports a later error-surface failure without an unhandled rejection", async () => {
+    const runtime = new FakeRuntime();
+    const startServer = vi.fn<StartDesktopShareServer>()
+      .mockRejectedValueOnce(new Error("first failure"))
+      .mockRejectedValueOnce(new Error("retry failure"));
+    const { controller } = setup({ runtime, startServer });
+    await controller!.start();
+
+    runtime.window.startupErrorFailures = 1;
+    runtime.window.errorActions!.retry();
+    await vi.waitFor(() => expect(runtime.fatalActions).toBeDefined());
+
+    expect(runtime.reportedErrors.map(({ phase }) => phase)).toEqual([
+      "startup",
+      "startup",
+      "startup-error-surface",
+    ]);
+    expect(controller!.state).toBe("starting");
+  });
+
+  test("native fallback retry queues a fresh attempt after the current attempt settles", async () => {
+    const runtime = new FakeRuntime();
+    runtime.window.startupErrorFailures = 1;
+    runtime.fatalActionMode = "retry";
+    const server = fakeServer(runtime.log);
+    const startServer = vi.fn<StartDesktopShareServer>()
+      .mockRejectedValueOnce(new Error("first failure"))
+      .mockResolvedValueOnce(server);
+    const { controller } = setup({ runtime, startServer });
+
+    await controller!.start();
+    await vi.waitFor(() => expect(controller!.state).toBe("ready"));
+
+    expect(startServer).toHaveBeenCalledTimes(2);
+    expect(runtime.createWindowCalls).toBe(1);
+  });
+
+  test("native fallback retry followed by quit does not resurrect the service", async () => {
+    const runtime = new FakeRuntime();
+    runtime.window.startupErrorFailures = 1;
+    runtime.fatalActionMode = "retry-quit";
+    const startServer = vi.fn<StartDesktopShareServer>()
+      .mockRejectedValue(new Error("first failure"));
+    const { controller } = setup({ runtime, startServer });
+
+    await controller!.start();
+    await vi.waitFor(() => expect(controller!.state).toBe("closed"));
+
+    expect(startServer).toHaveBeenCalledTimes(1);
     expect(runtime.quitCalls).toBe(1);
   });
 
@@ -323,6 +429,7 @@ describe("AppController", () => {
       "window.closed",
       "server.close",
       "server.idle:1",
+      "runtime.report-error:shutdown-close",
       "server.idle:2",
       "runtime.quit",
     ]);
