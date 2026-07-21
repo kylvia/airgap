@@ -444,11 +444,16 @@ describe("renderPage desktop surface", () => {
     expect(page).not.toContain(">Session list</span>");
   });
 
-  it("leaves the default browser renderer byte-identical to explicit browser mode", () => {
-    expect(renderPage()).toBe(renderPage(undefined, "summary", true, "zh-CN", "zh-CN", "browser", "9.9.9"));
-    expect(renderPage()).toContain('id="done"');
-    expect(renderPage()).toContain("claude --resume");
-    expect(renderPage()).not.toContain("9.9.9");
+  it("defaults Share pages to hidden tools while preserving explicit summary", () => {
+    const defaultPage = renderPage();
+    const summaryPage = renderPage(undefined, "summary");
+
+    expect(defaultPage).toBe(renderPage(undefined, "none", true, "zh-CN", "zh-CN", "browser", "9.9.9"));
+    expect(defaultPage).toContain('<option value="none" selected>');
+    expect(summaryPage).toContain('<option value="summary" selected>');
+    expect(defaultPage).toContain('id="done"');
+    expect(defaultPage).toContain("claude --resume");
+    expect(defaultPage).not.toContain("9.9.9");
   });
 });
 

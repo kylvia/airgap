@@ -20,7 +20,7 @@ export type ShareSurface = "browser" | "desktop";
  */
 export function renderPage(
   defaultSession?: string,
-  toolDisplay = "summary",
+  toolDisplay = "none",
   isMac = true,
   locale: Locale = "zh-CN",
   languagePreference: LanguagePreference = locale,
