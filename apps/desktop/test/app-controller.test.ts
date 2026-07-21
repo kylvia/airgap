@@ -35,6 +35,7 @@ class FakeWindow implements DesktopWindow {
   autoReady = true;
   minimized = false;
   destroyed = false;
+  rendererFailureListener: ((error: unknown) => void) | undefined;
 
   constructor(private readonly log: string[]) {}
 
@@ -95,6 +96,14 @@ class FakeWindow implements DesktopWindow {
     this.log.push("window.clear-history");
   }
 
+  onRendererFailure(listener: (error: unknown) => void): void {
+    this.rendererFailureListener = listener;
+  }
+
+  emitRendererFailure(error: unknown): void {
+    this.rendererFailureListener?.(error);
+  }
+
   async showStartupError(actions: { retry(): void; quit(): void }): Promise<void> {
     if (this.startupErrorFailures > 0) {
       this.startupErrorFailures -= 1;
@@ -109,9 +118,11 @@ class FakeRuntime implements DesktopRuntime {
   lockAvailable = true;
   quitCalls = 0;
   createWindowCalls = 0;
+  createWindowFailures = 0;
   secondInstanceListener: (() => void) | undefined;
   fatalActions: { retry(): void; quit(): void } | undefined;
   fatalActionMode: "none" | "retry" | "retry-quit" = "none";
+  fatalFailures = 0;
   readonly reportedErrors: Array<{ error: unknown; phase: DesktopFailurePhase }> = [];
   readonly window: FakeWindow;
 
@@ -132,6 +143,10 @@ class FakeRuntime implements DesktopRuntime {
   createWindow(): DesktopWindow {
     this.createWindowCalls += 1;
     this.log.push("runtime.create-window");
+    if (this.createWindowFailures > 0) {
+      this.createWindowFailures -= 1;
+      throw new Error("window construction failed");
+    }
     return this.window;
   }
 
@@ -145,6 +160,10 @@ class FakeRuntime implements DesktopRuntime {
   }
 
   async showFatalError(actions: { retry(): void; quit(): void }): Promise<void> {
+    if (this.fatalFailures > 0) {
+      this.fatalFailures -= 1;
+      throw new Error("native dialog failed");
+    }
     this.fatalActions = actions;
     this.log.push("runtime.fatal-error");
     if (this.fatalActionMode === "retry" || this.fatalActionMode === "retry-quit") {
@@ -313,6 +332,7 @@ describe("AppController", () => {
     expect(runtime.window.errorActions).toBeDefined();
     expect(startServer).toHaveBeenCalledTimes(1);
 
+    runtime.window.autoReady = false;
     runtime.window.errorActions!.retry();
     await vi.waitFor(() => expect(controller!.state).toBe("ready"));
     expect(startServer).toHaveBeenCalledTimes(2);
@@ -321,6 +341,20 @@ describe("AppController", () => {
     runtime.window.errorActions!.quit();
     await vi.waitFor(() => expect(controller!.state).toBe("closed"));
     expect(runtime.quitCalls).toBe(1);
+  });
+
+  test("window construction failure uses native fallback and can retry", async () => {
+    const runtime = new FakeRuntime();
+    runtime.createWindowFailures = 1;
+    const { controller } = setup({ runtime });
+
+    await controller!.start();
+    expect(runtime.fatalActions).toBeDefined();
+    expect(runtime.reportedErrors.map(({ phase }) => phase)).toContain("startup");
+
+    runtime.fatalActions!.retry();
+    await vi.waitFor(() => expect(controller!.state).toBe("ready"));
+    expect(runtime.createWindowCalls).toBe(2);
   });
 
   test("startup error document failure is reported and falls back to a native error", async () => {
@@ -341,6 +375,26 @@ describe("AppController", () => {
     expect(runtime.reportedErrors[0]?.error).toBe(startupError);
     expect(runtime.fatalActions).toBeDefined();
     expect(runtime.log).toContain("runtime.fatal-error");
+  });
+
+  test("native fallback failure exits instead of leaving an invisible process", async () => {
+    const runtime = new FakeRuntime();
+    runtime.window.startupErrorFailures = 1;
+    runtime.fatalFailures = 1;
+    const { controller } = setup({
+      runtime,
+      startServer: vi.fn<StartDesktopShareServer>().mockRejectedValue(new Error("startup failed")),
+    });
+
+    await controller!.start();
+    await vi.waitFor(() => expect(controller!.state).toBe("closed"));
+
+    expect(runtime.reportedErrors.map(({ phase }) => phase)).toEqual([
+      "startup",
+      "startup-error-surface",
+      "fatal-error-surface",
+    ]);
+    expect(runtime.quitCalls).toBe(1);
   });
 
   test("retry reports a later error-surface failure without an unhandled rejection", async () => {
@@ -410,6 +464,62 @@ describe("AppController", () => {
     expect(startServer).toHaveBeenCalledTimes(1);
     expect(runtime.window.loadedUrls).toHaveLength(2);
     expect(runtime.log.slice(-2)).toEqual(["window.clear-history", "window.show"]);
+  });
+
+  test("renderer failure after readiness shows recovery and reloads the existing service", async () => {
+    const runtime = new FakeRuntime();
+    const startServer = vi.fn<StartDesktopShareServer>(async () => fakeServer(runtime.log));
+    const { controller } = setup({ runtime, startServer });
+    await controller!.start();
+
+    runtime.window.emitRendererFailure(new Error("renderer crashed"));
+    await vi.waitFor(() => expect(runtime.window.errorActions).toBeDefined());
+    expect(controller!.state).toBe("starting");
+    expect(runtime.reportedErrors.map(({ phase }) => phase)).toContain("renderer");
+
+    runtime.window.autoReady = false;
+    runtime.window.errorActions!.retry();
+    await vi.waitFor(() => expect(controller!.state).toBe("ready"));
+    expect(startServer).toHaveBeenCalledTimes(1);
+    expect(runtime.window.loadedUrls).toHaveLength(2);
+    expect(runtime.createWindowCalls).toBe(1);
+  });
+
+  test("a second renderer failure on the visible error surface remains recoverable", async () => {
+    const runtime = new FakeRuntime();
+    const startServer = vi.fn<StartDesktopShareServer>()
+      .mockRejectedValue(new Error("service unavailable"));
+    const { controller } = setup({ runtime, startServer });
+    await controller!.start();
+    expect(runtime.log.filter((entry) => entry === "window.startup-error")).toHaveLength(1);
+
+    runtime.window.emitRendererFailure(new Error("error surface crashed"));
+    await vi.waitFor(() => {
+      expect(runtime.log.filter((entry) => entry === "window.startup-error")).toHaveLength(2);
+    });
+    expect(runtime.reportedErrors.map(({ phase }) => phase)).toContain("renderer");
+  });
+
+  test("closing while the local error surface rejects never opens a native dialog", async () => {
+    const runtime = new FakeRuntime();
+    const errorSurface = deferred<void>();
+    runtime.window.showStartupError = async () => {
+      await errorSurface.promise;
+      throw new Error("late error surface failure");
+    };
+    const { controller } = setup({
+      runtime,
+      startServer: vi.fn<StartDesktopShareServer>().mockRejectedValue(new Error("startup failed")),
+    });
+    const starting = controller!.start();
+    await vi.waitFor(() => expect(runtime.reportedErrors).toHaveLength(1));
+
+    const shutdown = controller!.shutdown();
+    errorSurface.resolve();
+    await Promise.all([starting, shutdown]);
+
+    expect(runtime.fatalActions).toBeUndefined();
+    expect(controller!.state).toBe("closed");
   });
 
   test("window close releases service through both idle barriers before quitting even if close rejects", async () => {

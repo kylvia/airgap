@@ -11,6 +11,7 @@ export interface DesktopWindow {
   loadURL(url: string): Promise<void>;
   setAllowedOrigin(origin: string): void;
   clearNavigationHistory(): void;
+  onRendererFailure(listener: (error: unknown) => void): void;
   showStartupError(actions: { retry(): void; quit(): void }): Promise<void>;
 }
 
@@ -30,6 +31,8 @@ export type DesktopFailurePhase =
   | "startup"
   | "startup-error-surface"
   | "fatal-error-surface"
+  | "renderer"
+  | "external-open"
   | "shutdown-close"
   | "shutdown-first-idle"
   | "shutdown-pending-attempt"
@@ -74,6 +77,7 @@ export class AppController {
   private shutdownPromise: Promise<void> | undefined;
   private focusRequested = false;
   private surfaceReady = false;
+  private hasEverRevealed = false;
   private readonly closingSignal: Promise<void>;
   private resolveClosing!: () => void;
 
@@ -109,6 +113,9 @@ export class AppController {
     window.once("closed", () => {
       void this.shutdown();
     });
+    window.onRendererFailure((error) => {
+      void this.handleRendererFailure(error);
+    });
     return window;
   }
 
@@ -131,6 +138,7 @@ export class AppController {
     window.show();
     if (shouldFocus) window.focus();
     this.surfaceReady = true;
+    this.hasEverRevealed = true;
     this.focusRequested = false;
   }
 
@@ -152,18 +160,22 @@ export class AppController {
   private runAttempt(): Promise<void> {
     if (this.attemptPromise) return this.attemptPromise;
     if (this.stateValue !== "starting") return Promise.resolve();
+    return this.trackAttempt(this.performAttempt());
+  }
 
-    const attempt = this.performAttempt();
-    this.attemptPromise = attempt.finally(() => {
+  private trackAttempt(attempt: Promise<void>): Promise<void> {
+    let trackedAttempt: Promise<void>;
+    trackedAttempt = attempt.finally(() => {
       if (this.attemptPromise === trackedAttempt) this.attemptPromise = undefined;
     });
-    const trackedAttempt = this.attemptPromise;
+    this.attemptPromise = trackedAttempt;
     return trackedAttempt;
   }
 
   private async performAttempt(): Promise<void> {
-    const window = this.ensureWindow();
+    let window: DesktopWindow | undefined;
     try {
+      window = this.ensureWindow();
       if (!this.server) {
         const server = await this.dependencies.startShareServer({
           surface: "desktop",
@@ -177,15 +189,20 @@ export class AppController {
       if (this.stateValue !== "starting") return;
 
       const server = this.server;
-      const ready = eventPromise(window, "ready-to-show");
+      const waitForInitialReveal = !this.hasEverRevealed;
+      const ready = waitForInitialReveal
+        ? eventPromise(window, "ready-to-show")
+        : Promise.resolve();
       window.setAllowedOrigin(new URL(server.url).origin);
       await window.loadURL(server.entryUrl);
       if (this.stateValue !== "starting") return;
 
-      const becameReady = await Promise.race([
-        ready.then(() => true),
-        this.closingSignal.then(() => false),
-      ]);
+      const becameReady = waitForInitialReveal
+        ? await Promise.race([
+          ready.then(() => true),
+          this.closingSignal.then(() => false),
+        ])
+        : true;
       if (!becameReady || this.stateValue !== "starting") return;
 
       window.clearNavigationHistory();
@@ -194,22 +211,59 @@ export class AppController {
     } catch (error) {
       if (this.stateValue !== "starting") return;
       this.dependencies.runtime.reportError(error, "startup");
-      const actions = this.errorActions();
-      try {
-        await Promise.race([window.showStartupError(actions), this.closingSignal]);
-        if (this.stateValue !== "starting") return;
-        this.revealReadySurface(window);
-      } catch (surfaceError) {
-        this.dependencies.runtime.reportError(surfaceError, "startup-error-surface");
-        try {
-          await Promise.race([
-            this.dependencies.runtime.showFatalError(actions),
-            this.closingSignal,
-          ]);
-        } catch (fatalError) {
-          this.dependencies.runtime.reportError(fatalError, "fatal-error-surface");
-        }
-      }
+      if (window) await this.presentStartupError(window);
+      else await this.presentFatalError();
+    }
+  }
+
+  private async handleRendererFailure(error: unknown): Promise<void> {
+    if (
+      this.stateValue === "starting" &&
+      this.surfaceReady &&
+      this.attemptPromise
+    ) {
+      await Promise.allSettled([this.attemptPromise]);
+      return this.handleRendererFailure(error);
+    }
+    if (
+      this.stateValue !== "ready" &&
+      !(this.stateValue === "starting" && this.surfaceReady)
+    ) return;
+    const window = this.window;
+    if (!window || window.isDestroyed()) return;
+
+    this.stateValue = "starting";
+    this.surfaceReady = false;
+    this.startPromise = undefined;
+    this.dependencies.runtime.reportError(error, "renderer");
+    await this.trackAttempt(this.presentStartupError(window));
+  }
+
+  private async presentStartupError(window: DesktopWindow): Promise<void> {
+    const actions = this.errorActions();
+    try {
+      await Promise.race([window.showStartupError(actions), this.closingSignal]);
+      if (this.stateValue !== "starting") return;
+      this.revealReadySurface(window);
+    } catch (surfaceError) {
+      this.dependencies.runtime.reportError(surfaceError, "startup-error-surface");
+      if (this.stateValue !== "starting") return;
+      await this.presentFatalError(actions);
+    }
+  }
+
+  private async presentFatalError(
+    actions = this.errorActions(),
+  ): Promise<void> {
+    if (this.stateValue !== "starting") return;
+    try {
+      await Promise.race([
+        this.dependencies.runtime.showFatalError(actions),
+        this.closingSignal,
+      ]);
+    } catch (fatalError) {
+      this.dependencies.runtime.reportError(fatalError, "fatal-error-surface");
+      void this.shutdown();
     }
   }
 
