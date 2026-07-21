@@ -1,9 +1,13 @@
 {
   "name": "@airgap/desktop",
+  "productName": "Airgap",
   "version": "0.3.0",
   "private": true,
   "type": "module",
   "main": "dist/main.cjs",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "build": "tsup src/main.ts --format cjs --platform node --target node22 --out-dir dist --clean --external electron",
     "start": "npm run build && electron .",
