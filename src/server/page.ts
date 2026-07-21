@@ -137,6 +137,7 @@ export function renderPage(
         <button type="button" id="prefclose" aria-label="${escapeHtml(t("share.page.closeSettings"))}">${escapeHtml(t("share.page.closeSettings"))}</button>
       </div>
       ${settingsBody}
+      <p id="settings-status" class="status" role="status" aria-live="polite"></p>
     </div>
   </dialog>`;
   const emptyStateMarkup = isDesktop
@@ -243,6 +244,9 @@ ${sidCss}
   #prefpanel .prow { display: flex; align-items: center; justify-content: space-between; gap: 18px;
     min-height: 48px; font-size: 13px; color: var(--fg); }
   #prefpanel .prow + .prow { border-top: 1px solid var(--border-subtle); }
+  #prefpanel #settings-status { margin-top: 12px; color: var(--fg-muted); font-size: 12px; line-height: 1.5; }
+  #prefpanel #settings-status:empty { display: none; }
+  #prefpanel #settings-status.err { color: var(--danger); }
   main { flex: 1; display: flex; min-height: 0; position: relative; }
   /* 切换会话/展示级别时盖住内容区：实色纸面（铁律禁半透明材质），品牌 mark 两块交替脉动。
      显隐用 display 硬切（不过渡 opacity/visibility）：headless 截图合成对这类过渡不可靠，且遮罩不需要淡入。 */
@@ -342,7 +346,21 @@ let exportInFlight = false;
 const inFlight = { bootstrap: 0, refresh: 0, load: 0, export: 0, settings: 0 };
 
 const $ = (id) => document.getElementById(id);
-function setStatus(msg, err) { const s = $("status"); s.textContent = msg; s.className = "status" + (err ? " err" : ""); }
+const panel = $("prefpanel");
+const button = $("prefs");
+let pendingPreferencesFocusRestore = false;
+
+function setStatus(msg, err) {
+  const className = "status" + (err ? " err" : "");
+  const status = $("status");
+  status.textContent = msg;
+  status.className = className;
+  if (panel.open) {
+    const dialogStatus = $("settings-status");
+    dialogStatus.textContent = msg;
+    dialogStatus.className = className;
+  }
+}
 
 function setSelectionControlsDisabled(disabled) {
   if (SURFACE !== "desktop") return;
@@ -371,6 +389,10 @@ function renderInteractionState() {
   for (const checkbox of document.querySelectorAll("#list input[type=checkbox]")) checkbox.disabled = busy;
   const emptyRecheck = $("empty-recheck");
   if (emptyRecheck) emptyRecheck.disabled = busy;
+  if (!busy && !panel.open && pendingPreferencesFocusRestore) {
+    pendingPreferencesFocusRestore = false;
+    button.focus();
+  }
 }
 
 function beginInteraction(kind) {
@@ -779,9 +801,6 @@ for (const btn of document.querySelectorAll("footer button[data-a]")) {
 }
 $("all").onclick = () => { if (!detail || interactionBusy()) return; for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
 $("none").onclick = () => { if (!detail || interactionBusy()) return; selected.clear(); renderList(); updateCount(); syncPreview(null); };
-const panel = $("prefpanel");
-const button = $("prefs");
-
 function openPreferences() {
   if (panel.open || interactionBusy()) return;
   panel.showModal();
@@ -800,6 +819,11 @@ panel.onclick = (event) => {
 };
 panel.addEventListener("close", () => {
   button.setAttribute("aria-expanded", "false");
+  if (button.disabled) {
+    pendingPreferencesFocusRestore = true;
+    return;
+  }
+  pendingPreferencesFocusRestore = false;
   button.focus();
 });
 // 切换工具展示级别：服务端按新级别重渲各轮片段（预览=导出，物理裁剪而非 CSS 隐藏），保留已勾选轮次；

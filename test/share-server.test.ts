@@ -358,6 +358,24 @@ describe("renderPage desktop surface", () => {
     expect(page).not.toContain('document.addEventListener("click"');
   });
 
+  it("defers focus restoration until a settings interaction has re-enabled the trigger", () => {
+    expect(page).toContain("let pendingPreferencesFocusRestore = false");
+    expect(page).toContain("if (button.disabled) {");
+    expect(page).toContain("pendingPreferencesFocusRestore = true");
+    expect(page).toContain("if (!busy && !panel.open && pendingPreferencesFocusRestore) {");
+    expect(page).toContain("pendingPreferencesFocusRestore = false");
+    expect(page).toContain("button.focus()");
+  });
+
+  it("mirrors settings feedback into a live region inside the open modal", () => {
+    expect(page).toContain('<p id="settings-status" class="status" role="status" aria-live="polite"></p>');
+    expect(page).toContain('const className = "status" + (err ? " err" : "")');
+    expect(page).toContain("if (panel.open) {");
+    expect(page).toContain('const dialogStatus = $("settings-status")');
+    expect(page).toContain("dialogStatus.textContent = msg");
+    expect(page).toContain("dialogStatus.className = className");
+  });
+
   it("starts desktop picker and export actions disabled and restores them from shared state", () => {
     expect(page).toMatch(/<button[^>]*data-testid="copy-text"[^>]*disabled/);
     expect(page).toMatch(/<button[^>]*data-testid="save-image"[^>]*disabled/);
