@@ -15,6 +15,7 @@ export interface DesktopSmokeResult {
   nodeGlobalsAbsent: boolean;
   sessionsDiscovered: boolean;
   settingsDialogOpened: boolean;
+  settingsBackdropInputSent: boolean;
   settingsDialogClosed: boolean;
   settingsFocusRestored: boolean;
   conversationChanged: boolean;
@@ -31,6 +32,13 @@ interface SmokeBrowserWindow {
   readonly webContents: {
     executeJavaScript<T>(code: string): Promise<T>;
     getURL(): string;
+    sendInputEvent(event: {
+      type: "mouseDown" | "mouseUp";
+      x: number;
+      y: number;
+      button: "left";
+      clickCount: number;
+    }): void;
   };
   close(): void;
   isDestroyed(): boolean;
@@ -138,6 +146,7 @@ function createInitialResult(appVersion: string): DesktopSmokeResult {
     nodeGlobalsAbsent: false,
     sessionsDiscovered: false,
     settingsDialogOpened: false,
+    settingsBackdropInputSent: false,
     settingsDialogClosed: false,
     settingsFocusRestored: false,
     conversationChanged: false,
@@ -190,7 +199,14 @@ export async function runDesktopSmoke(dependencies: DesktopSmokeDependencies): P
     const settingsState = await dependencies.window.webContents.executeJavaScript<{
       opened: boolean;
       busyStarted: boolean;
-      closed: boolean;
+      x: number;
+      y: number;
+      viewportWidth: number;
+      viewportHeight: number;
+      dialogLeft: number;
+      dialogTop: number;
+      dialogRight: number;
+      dialogBottom: number;
     }>(`(() => {
       const button = document.querySelector('[data-testid="settings"]');
       const panel = document.getElementById('prefpanel');
@@ -198,23 +214,86 @@ export async function runDesktopSmoke(dependencies: DesktopSmokeDependencies): P
       if (!(button instanceof HTMLButtonElement) ||
           !(panel instanceof HTMLDialogElement) ||
           !(limit instanceof HTMLSelectElement)) {
-        return { opened: false, busyStarted: false, closed: false };
+        return { opened: false, busyStarted: false, x: -1, y: -1,
+          viewportWidth: innerWidth, viewportHeight: innerHeight,
+          dialogLeft: 0, dialogTop: 0, dialogRight: 0, dialogBottom: 0 };
       }
       button.click();
       const opened = panel.open && document.activeElement === panel;
       const target = [...limit.options].find((option) => option.value !== limit.value);
-      if (!opened || !target) return { opened, busyStarted: false, closed: false };
-      limit.value = target.value;
-      limit.dispatchEvent(new Event('change', { bubbles: true }));
-      const busyStarted = button.disabled;
-      panel.click();
-      return { opened, busyStarted, closed: !panel.open };
+      let busyStarted = false;
+      if (opened && target) {
+        limit.value = target.value;
+        limit.dispatchEvent(new Event('change', { bubbles: true }));
+        busyStarted = button.disabled;
+      }
+      const rect = panel.getBoundingClientRect();
+      const candidates = [
+        { x: 1, y: 1 },
+        { x: Math.max(0, innerWidth - 2), y: 1 },
+        { x: 1, y: Math.max(0, innerHeight - 2) },
+        { x: Math.max(0, innerWidth - 2), y: Math.max(0, innerHeight - 2) },
+      ];
+      const point = candidates.find(({ x, y }) =>
+        x >= 0 && y >= 0 && x < innerWidth && y < innerHeight &&
+        (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom));
+      return {
+        opened,
+        busyStarted,
+        x: point?.x ?? -1,
+        y: point?.y ?? -1,
+        viewportWidth: innerWidth,
+        viewportHeight: innerHeight,
+        dialogLeft: rect.left,
+        dialogTop: rect.top,
+        dialogRight: rect.right,
+        dialogBottom: rect.bottom,
+      };
     })()`);
     result.settingsDialogOpened = settingsState.opened;
-    result.settingsDialogClosed = settingsState.closed;
-    if (!settingsState.opened || !settingsState.busyStarted || !settingsState.closed) {
+    const coordinates = [
+      settingsState.x,
+      settingsState.y,
+      settingsState.viewportWidth,
+      settingsState.viewportHeight,
+      settingsState.dialogLeft,
+      settingsState.dialogTop,
+      settingsState.dialogRight,
+      settingsState.dialogBottom,
+    ];
+    const pointInViewport = settingsState.x >= 0 && settingsState.y >= 0 &&
+      settingsState.x < settingsState.viewportWidth &&
+      settingsState.y < settingsState.viewportHeight;
+    const pointOutsideDialog = settingsState.x < settingsState.dialogLeft ||
+      settingsState.x >= settingsState.dialogRight ||
+      settingsState.y < settingsState.dialogTop ||
+      settingsState.y >= settingsState.dialogBottom;
+    if (!settingsState.opened || !settingsState.busyStarted ||
+        !coordinates.every(Number.isFinite) || !pointInViewport || !pointOutsideDialog) {
       throw new Error("settings dialog check failed");
     }
+    dependencies.window.webContents.sendInputEvent({
+      type: "mouseDown",
+      x: settingsState.x,
+      y: settingsState.y,
+      button: "left",
+      clickCount: 1,
+    });
+    dependencies.window.webContents.sendInputEvent({
+      type: "mouseUp",
+      x: settingsState.x,
+      y: settingsState.y,
+      button: "left",
+      clickCount: 1,
+    });
+    result.settingsBackdropInputSent = true;
+    result.settingsDialogClosed = await poll(
+      () => dependencies.window.webContents.executeJavaScript<boolean>(`(() => {
+        const panel = document.getElementById('prefpanel');
+        return panel instanceof HTMLDialogElement && !panel.open;
+      })()`),
+      Boolean,
+    );
     result.settingsFocusRestored = await poll(
       () => dependencies.window.webContents.executeJavaScript<boolean>(`(() => {
         const button = document.querySelector('[data-testid="settings"]');
