@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -214,4 +214,7 @@ smokeTest("runs the real secure Share window from discovery through shutdown", a
 
   const origin = originMatch![1]!;
   await expect(fetch(origin, { signal: AbortSignal.timeout(2_000) })).rejects.toThrow();
+  await expect(access(path.join(homePath, ".airgap", "config.json"))).rejects.toMatchObject({
+    code: "ENOENT",
+  });
 }, 40_000);

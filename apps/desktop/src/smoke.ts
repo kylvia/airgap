@@ -212,21 +212,17 @@ export async function runDesktopSmoke(dependencies: DesktopSmokeDependencies): P
     }>(`(() => {
       const button = document.querySelector('[data-testid="settings"]');
       const panel = document.getElementById('prefpanel');
-      const limit = document.getElementById('limit');
       if (!(button instanceof HTMLButtonElement) ||
-          !(panel instanceof HTMLDialogElement) ||
-          !(limit instanceof HTMLSelectElement)) {
+          !(panel instanceof HTMLDialogElement)) {
         return { opened: false, busyStarted: false, x: -1, y: -1,
           viewportWidth: innerWidth, viewportHeight: innerHeight,
           dialogLeft: 0, dialogTop: 0, dialogRight: 0, dialogBottom: 0 };
       }
       button.click();
       const opened = panel.open && document.activeElement === panel;
-      const target = [...limit.options].find((option) => option.value !== limit.value);
       let busyStarted = false;
-      if (opened && target) {
-        limit.value = target.value;
-        limit.dispatchEvent(new Event('change', { bubbles: true }));
+      if (opened && typeof beginInteraction === 'function') {
+        beginInteraction('settings');
         busyStarted = button.disabled;
       }
       const rect = panel.getBoundingClientRect();
@@ -296,16 +292,16 @@ export async function runDesktopSmoke(dependencies: DesktopSmokeDependencies): P
       })()`),
       Boolean,
     );
-    result.settingsInteractionSettled = await poll(
-      () => dependencies.window.webContents.executeJavaScript<boolean>(`(() => {
-        const panel = document.getElementById('prefpanel');
-        const button = document.querySelector('[data-testid="settings"]');
-        return panel instanceof HTMLDialogElement && !panel.open &&
-          button instanceof HTMLButtonElement && !button.disabled;
-      })()`),
-      Boolean,
-      15_000,
-    );
+    result.settingsInteractionSettled = await dependencies.window.webContents.executeJavaScript<boolean>(`(() => {
+      const panel = document.getElementById('prefpanel');
+      const button = document.querySelector('[data-testid="settings"]');
+      if (!(panel instanceof HTMLDialogElement) ||
+          !(button instanceof HTMLButtonElement) ||
+          typeof endInteraction !== 'function') return false;
+      endInteraction('settings');
+      return !panel.open && !button.disabled;
+    })()`);
+    if (!result.settingsInteractionSettled) throw new Error("settings interaction did not settle");
     result.settingsFocusRestored = await poll(
       () => dependencies.window.webContents.executeJavaScript<boolean>(`(() => {
         const button = document.querySelector('[data-testid="settings"]');
