@@ -31,6 +31,10 @@ npm install -g airgap
 
 `npx` 首次运行时可能从 npm 下载 airgap。交互式运行还可能检查 npm 新版本；确切网络边界和关闭方式见[版本更新提示](#版本更新提示)。需要可复现安装时，用 `npx airgap@<版本>` 或 `npm install -g airgap@<版本>` 固定到你审核过的版本。
 
+### 桌面端状态
+
+仓库里已有面向非终端用户的 **Apple Silicon macOS Share 开发者预览**，可从源码运行；它还不是可公开下载的签名、公证安装包，也暂未启用桌面自动更新。普通用户目前仍应使用上面的 npm CLI。开发和验证方式见 [Airgap Desktop](./apps/desktop/README.md)。
+
 当前格式支持：
 
 | 命令 | Claude Code | Codex | 用途 |
@@ -123,6 +127,8 @@ airgap share
 ```
 
 浏览器会自动打开。服务只绑定 loopback（本机回环地址）；点击**完成关闭**或空闲 10 分钟后退出，airgap 自身不常驻。
+
+从源码运行桌面开发者预览可用 `npm run desktop:start`。桌面窗口关闭时进程和本地服务立即退出；这不会改变 CLI 的 10 分钟空闲策略。桌面端与 CLI 复用同一个 Share 服务和导出逻辑，不维护第二套业务实现。
 
 Share 支持英文和简体中文，默认跟随系统语言。可用 `--lang` 或 `AIRGAP_LANG` 临时覆盖，也可以从设置面板持久化选择。运行 `airgap doctor` 可查看检测语言和最终语言。
 

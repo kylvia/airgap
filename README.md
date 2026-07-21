@@ -31,6 +31,10 @@ npm install -g airgap
 
 `npx` may download airgap from npm on first use. Interactive runs may also check npm for a newer release; see [Update notices](#update-notices) for the exact network boundary and opt-out. Pin a reviewed release with `npx airgap@<version>` or `npm install -g airgap@<version>` when reproducibility matters.
 
+### Desktop status
+
+The repository contains an **Apple Silicon macOS Share developer preview** for non-terminal users. It can be run from source, but it is not yet a signed and notarized public download and does not yet enable desktop auto-updates. Regular users should continue to use the npm CLI above. See [Airgap Desktop](./apps/desktop/README.md) for development and verification instructions.
+
 Current format support:
 
 | Command | Claude Code | Codex | Purpose |
@@ -123,6 +127,8 @@ airgap share
 ```
 
 The browser opens automatically. The server binds only to loopback and stops when you click **Done** or after ten minutes of inactivity; airgap itself does not stay resident.
+
+Run the desktop developer preview from source with `npm run desktop:start`. Closing its window immediately stops its process and local server; this does not change the CLI's ten-minute idle policy. Desktop and CLI reuse the same Share server and export logic rather than maintaining a second implementation.
 
 Share supports English and Simplified Chinese and follows the system language by default. Override it with `--lang` or `AIRGAP_LANG`, or persist a choice from the Share settings panel. Run `airgap doctor` to see the detected and resolved locale.
 
