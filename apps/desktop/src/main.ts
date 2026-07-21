@@ -13,12 +13,22 @@ import { startShareServer } from "../../../src/server/share-server.js";
 import { AppController } from "./app-controller.js";
 import { createElectronExportAdapter } from "./electron-export-adapter.js";
 import { createElectronRuntime } from "./electron-runtime.js";
+import { readDesktopSmokeConfig, runDesktopSmoke } from "./smoke.js";
 
 app.setName("Airgap");
 
+const smokeConfig = readDesktopSmokeConfig({ isPackaged: app.isPackaged, env: process.env });
+if (smokeConfig) app.setPath("userData", smokeConfig.userDataPath);
+
+let primaryWindow: BrowserWindow | undefined;
+
 const runtime = createElectronRuntime({
   app,
-  createBrowserWindow: (options) => new BrowserWindow(options),
+  createBrowserWindow: (options) => {
+    const window = new BrowserWindow(options);
+    primaryWindow = window;
+    return window;
+  },
   shell,
   dialog,
 });
@@ -57,7 +67,17 @@ if (controller) {
   });
 
   void app.whenReady()
-    .then(() => controller.start())
+    .then(async () => {
+      await controller.start();
+      if (!smokeConfig || smokeConfig.isSecondLaunch || !primaryWindow) return;
+      await runDesktopSmoke({
+        config: smokeConfig,
+        app,
+        window: primaryWindow,
+        clipboard,
+        logOrigin: (origin) => { console.log(`AIRGAP_SMOKE_ORIGIN=${origin}`); },
+      });
+    })
     .catch((error: unknown) => {
       runtime.reportError(error, "startup");
       return controller.shutdown();
