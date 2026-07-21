@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_SESSION_LIST_LIMIT,
+  DEFAULT_SHARE_TOOL_DISPLAY,
   loadConfig,
   sessionListLimit,
   shareToolDisplay,
@@ -180,11 +181,15 @@ describe("updateConfig (语言与 Share 设置的原子持久化)", () => {
 });
 
 describe("share.toolDisplay 加载", () => {
-  it("合法值生效，非法值静默回退默认", async () => {
+  it("合法值生效，非法值与缺失值回退 Share 默认，且不改变通用默认", async () => {
+    expect(DEFAULT_SHARE_TOOL_DISPLAY).toBe("none");
+    expect(DEFAULT_TOOL_DISPLAY).toBe("summary");
+    expect(shareToolDisplay(await loadConfig(await homeWith('{"share":{"toolDisplay":"none"}}')))).toBe("none");
     expect(shareToolDisplay(await loadConfig(await homeWith('{"share":{"toolDisplay":"full"}}')))).toBe("full");
+    expect(shareToolDisplay(await loadConfig(await homeWith('{"share":{"toolDisplay":"summary"}}')))).toBe("summary");
     expect(shareToolDisplay(await loadConfig(await homeWith('{"share":{"toolDisplay":"bogus"}}')))).toBe(
-      DEFAULT_TOOL_DISPLAY,
+      DEFAULT_SHARE_TOOL_DISPLAY,
     );
-    expect(shareToolDisplay(await loadConfig(await homeWith(null)))).toBe(DEFAULT_TOOL_DISPLAY);
+    expect(shareToolDisplay(await loadConfig(await homeWith(null)))).toBe(DEFAULT_SHARE_TOOL_DISPLAY);
   });
 });
