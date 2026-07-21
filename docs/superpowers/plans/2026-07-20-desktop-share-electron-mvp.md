@@ -6,7 +6,7 @@
 
 **Architecture:** Add a private npm workspace under `apps/desktop`; keep the published root CLI package unchanged through its existing `files` allowlist. Electron main owns lifecycle, the authenticated loopback server, BrowserWindow, capture, clipboard, and save dialog. The sandboxed renderer is the existing shared Share page and has no Node or IPC bridge.
 
-**Tech Stack:** Electron 43.1.0, Electron Forge 7.11.2, TypeScript, tsup, Vitest, macOS APIs exposed by Electron.
+**Tech Stack:** Electron 43.1.0, Electron Forge 8.0.0-alpha.10, TypeScript, tsup, Vitest, macOS APIs exposed by Electron.
 
 ---
 
@@ -23,12 +23,12 @@
 
 ```sh
 npm view electron@43.1.0 name version repository engines time.43.1.0 scripts
-npm view @electron-forge/cli@7.11.2 name version repository engines time.7.11.2 scripts
-npm view @electron-forge/maker-dmg@7.11.2 name version repository engines time.7.11.2 scripts
-npm view @electron-forge/maker-zip@7.11.2 name version repository engines time.7.11.2 scripts
+npm view @electron-forge/cli@8.0.0-alpha.10 name version repository engines time.8.0.0-alpha.10 scripts
+npm view @electron-forge/maker-dmg@8.0.0-alpha.10 name version repository engines time.8.0.0-alpha.10 scripts
+npm view @electron-forge/maker-zip@8.0.0-alpha.10 name version repository engines time.8.0.0-alpha.10 scripts
 ```
 
-Confirm each package is from the official Electron GitHub organization and has been public for at least seven days. Record the published lifecycle scripts and binaries before approving it. Electron 43.1.0 publishes no npm lifecycle script; it exposes the `electron` and `install-electron` binaries and downloads its pinned runtime on first development invocation, as documented by Electron. If any fact differs, stop and update this plan rather than silently selecting `latest`.
+Confirm each package is from the official Electron GitHub organization and has been public for at least seven days. Forge 8 alpha.10 is deliberately pinned because the latest stable 7.11.2 build chain resolves to a critical vulnerable `node-tar`; the alpha is development-only, was published on 2026-07-02, and must pass audit plus real package/make verification before release. Record the published lifecycle scripts and binaries before approving it. Electron 43.1.0 publishes no npm lifecycle script; it exposes the `electron` and `install-electron` binaries and downloads its pinned runtime on first development invocation, as documented by Electron. If any fact differs, stop and update this plan rather than silently selecting `latest`.
 - [ ] Add `"workspaces": ["apps/desktop"]` to the root package. Keep the existing root `files` list unchanged so `npm pack --dry-run` still excludes `apps/desktop`.
 - [ ] Add root scripts:
 
@@ -56,9 +56,9 @@ Confirm each package is from the official Electron GitHub organization and has b
     "make": "npm run build && electron-forge make --arch=arm64"
   },
   "devDependencies": {
-    "@electron-forge/cli": "7.11.2",
-    "@electron-forge/maker-dmg": "7.11.2",
-    "@electron-forge/maker-zip": "7.11.2",
+    "@electron-forge/cli": "8.0.0-alpha.10",
+    "@electron-forge/maker-dmg": "8.0.0-alpha.10",
+    "@electron-forge/maker-zip": "8.0.0-alpha.10",
     "electron": "43.1.0"
   }
 }
