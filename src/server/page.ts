@@ -565,19 +565,24 @@ function clearCurrentConversation() {
   renderInteractionState();
 }
 
-async function refreshSessions() {
-  beginInteraction("refresh");
+async function refreshSessions({ foreground = true } = {}) {
+  if (foreground) beginInteraction("refresh");
   try {
     const q = detail ? "?ensure=" + encodeURIComponent(detail.id) : "";
     const r = await fetch("/api/sessions" + q);
     if (!r.ok) return "failed";
     const data = await r.json();
+    if (!foreground && interactionBusy()) return "stale";
+    const currentMissing = SURFACE === "desktop" && !!detail && !data.sessions.some((session) => session.id === detail.id);
+    // A background resume refresh must never clear the preview or start a foreground
+    // replacement load. The next manual Recheck handles a vanished conversation.
+    if (!foreground && currentMissing) return "stale";
     if (SURFACE === "desktop" && detail && data.issues && data.issues.length > 0) {
       discoveryIssueMessage = discoveryDiagnostic(data.issues[0]);
       setStatus(discoveryIssueMessage, true);
       return "diagnostic";
     }
-    if (SURFACE === "desktop" && detail && !data.sessions.some((session) => session.id === detail.id)) {
+    if (currentMissing) {
       discoveryIssueMessage = null;
       setStatus(msg("share.desktop.currentUnavailable"), true);
       clearCurrentConversation();
@@ -596,7 +601,7 @@ async function refreshSessions() {
     showDiscoveryState(data.sessions, data.issues || []);
     return "ok";
   } finally {
-    endInteraction("refresh");
+    if (foreground) endInteraction("refresh");
   }
 }
 let manualRefreshInFlight = false;
@@ -652,12 +657,24 @@ $("limit").onchange = async () => {
     endInteraction("settings");
   }
 };
+let resumeRefreshInFlight = false;
+async function refreshSessionsAfterResume() {
+  if (resumeRefreshInFlight || interactionBusy()) return;
+  resumeRefreshInFlight = true;
+  try {
+    await refreshSessions({ foreground: false });
+  } catch {
+    // Resume refresh is best-effort; manual Recheck remains the surfaced recovery path.
+  } finally {
+    resumeRefreshInFlight = false;
+  }
+}
 const resumeEvent = SURFACE === "desktop" ? "airgap-native-focus" : "visibilitychange";
 window.addEventListener(resumeEvent, () => {
   if (resumeEvent === "visibilitychange" && document.visibilityState !== "visible") return;
-  if (manualRefreshInFlight || interactionBusy() || Date.now() - lastListRefresh < 5000) return;
+  if (manualRefreshInFlight || resumeRefreshInFlight || interactionBusy() || Date.now() - lastListRefresh < 5000) return;
   lastListRefresh = Date.now();
-  refreshSessions().catch(() => {});
+  refreshSessionsAfterResume();
 });
 
 function rel(ms) {

@@ -276,7 +276,8 @@ describe("renderPage desktop surface", () => {
 
     const manual = page.slice(page.indexOf("async function refreshCurrentSession"), page.indexOf('$("refresh").onclick'));
     expect(manual).toContain('refreshResult === "replaced"');
-    expect(page).toContain("refreshSessions().catch(() => {})");
+    expect(refresh).toContain('if (!foreground && currentMissing) return "stale"');
+    expect(page).toContain("refreshSessionsAfterResume()");
   });
 
   it("clears selection, preview, and export state before accepting a replacement list", () => {
@@ -470,6 +471,21 @@ describe("renderPage desktop surface", () => {
     expect(page).toContain("window.addEventListener(resumeEvent, () => {");
     expect(page).toContain('if (resumeEvent === "visibilitychange" && document.visibilityState !== "visible") return');
     expect(page).not.toContain('window.addEventListener("focus", () => {');
+  });
+
+  it("refreshes resumed apps in the background without disabling controls", () => {
+    const refresh = page.slice(page.indexOf("async function refreshSessions"), page.indexOf("let manualRefreshInFlight"));
+    expect(refresh).toContain('if (foreground) beginInteraction("refresh")');
+    expect(refresh).toContain('if (!foreground && interactionBusy()) return "stale"');
+    expect(refresh).toContain('if (!foreground && currentMissing) return "stale"');
+    expect(refresh).toContain('if (foreground) endInteraction("refresh")');
+
+    const resume = page.slice(page.indexOf("let resumeRefreshInFlight"), page.indexOf("function rel"));
+    expect(resume).toContain("if (resumeRefreshInFlight || interactionBusy()) return");
+    expect(resume).toContain("resumeRefreshInFlight = true");
+    expect(resume).toContain("await refreshSessions({ foreground: false })");
+    expect(resume).toContain("resumeRefreshInFlight = false");
+    expect(resume).not.toContain('beginInteraction("refresh")');
   });
 
   it("keeps selection controls out of the tab order while no conversation is loaded", () => {
