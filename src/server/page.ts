@@ -9,6 +9,8 @@ export function serializeForScript(value: unknown): string {
     .replace(/\u2029/g, "\\u2029");
 }
 
+export type ShareSurface = "browser" | "desktop";
+
 /**
  * 交互页：左勾选、右实时预览（隔离在 iframe 里，聊天 CSS 不污染 app 外壳）、
  * 底部发送按钮。所有会话数据经 /api 拉取，页面零外链。
@@ -18,17 +20,37 @@ export function serializeForScript(value: unknown): string {
  */
 export function renderPage(
   defaultSession?: string,
-  toolDisplay = "summary",
+  toolDisplay = "none",
   isMac = true,
   locale: Locale = "zh-CN",
   languagePreference: LanguagePreference = locale,
+  surface: ShareSurface = "browser",
+  appVersion?: string,
 ): string {
+  const isDesktop = surface === "desktop";
   const i18n = createI18n(locale);
   const t = (key: string, params?: Record<string, string | number>): string => i18n.t(key, params);
   const hiddenStatusKey = isMac ? "share.page.status.other" : "share.page.status.mac";
+  const desktopOmittedMessages = new Set([
+    "share.page.clipboardHint",
+    "share.page.closed",
+    "share.page.copied",
+    "share.page.copyResume",
+    "share.page.done",
+    "share.page.listSaved",
+    "share.page.loadClosed",
+    "share.page.settings",
+    "share.page.status.mac",
+    "share.page.status.other",
+  ]);
   const messages = Object.fromEntries(
     i18n.keys()
-      .filter((key) => (key.startsWith("share.page.") || key.startsWith("share.turnCount")) && key !== hiddenStatusKey)
+      .filter((key) => (
+        key.startsWith("share.page.") ||
+        key.startsWith("share.turnCount") ||
+        (isDesktop && key.startsWith("share.desktop."))
+      ) && key !== hiddenStatusKey)
+      .filter((key) => !isDesktop || !desktopOmittedMessages.has(key))
       .map((key) => [key, i18n.t(key)]),
   );
   const chatCss = JSON.stringify(CHAT_CSS);
@@ -50,12 +72,141 @@ export function renderPage(
       return `<option value="${value}"${value === languagePreference ? " selected" : ""}>${escapeHtml(t(`share.page.language.${key}`))}</option>`;
     })
     .join("");
+  const sidCss = isDesktop ? "" : `
+  /* 当前会话 id 胶囊：点击复制 resume 命令 */
+  header #sid { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted);
+    border: 1px solid var(--border); border-radius: var(--radius-tag); padding: 3px 10px;
+    cursor: pointer; user-select: none; white-space: nowrap;
+    transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
+  header #sid:hover { color: var(--fg); border-color: var(--border-strong); }`;
+  const desktopCss = isDesktop ? `
+  body[data-surface="desktop"] header { padding: 15px 22px; }
+  body[data-surface="desktop"] header select { min-width: 260px; max-width: min(42vw, 440px); }
+  body[data-surface="desktop"] #prefpanel details { border-top: 1px solid var(--border-subtle); padding: 10px 0 2px; }
+  body[data-surface="desktop"] #prefpanel summary { cursor: pointer; font-size: 13px; font-weight: 500; }
+  body[data-surface="desktop"] #prefpanel .about { border-top: 1px solid var(--border-subtle); margin-top: 10px; padding-top: 10px; }
+  body[data-surface="desktop"] #prefpanel .about p { color: var(--fg-muted); font-size: 12px; line-height: 1.6; }
+  body[data-surface="desktop"] #prefpanel .about a { color: var(--fg); text-underline-offset: 3px; }
+  body[data-surface="desktop"] .empty-state { position: absolute; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center; background: var(--bg-subtle); padding: 32px; }
+  body[data-surface="desktop"] .empty-state[hidden] { display: none; }
+  body[data-surface="desktop"] .empty-card { width: min(520px, 100%); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 30px; }
+  body[data-surface="desktop"] .empty-card h2 { font-family: var(--font-serif); font-size: 25px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 10px; }
+  body[data-surface="desktop"] .empty-card p { color: var(--fg-muted); font-size: 14px; line-height: 1.65; margin-top: 7px; }
+  body[data-surface="desktop"] .empty-card button { margin-top: 18px; height: 36px; padding: 0 18px; border: 1px solid var(--btn-primary-bg); border-radius: var(--radius-button); background: var(--btn-primary-bg); color: var(--btn-primary-fg); font: 500 13px var(--font-sans); cursor: pointer; }
+  body[data-surface="desktop"] .empty-card a { display: inline-block; margin: 12px 0 0 12px; color: var(--fg); font-size: 13px; text-underline-offset: 3px; }
+  body[data-surface="desktop"] .row .roles { display: block; color: var(--fg-subtle); font-size: 11px; margin-bottom: 3px; }
+  body[data-surface="desktop"] .left .bar button { border: 0; border-radius: var(--radius-input); background: transparent; color: var(--fg); cursor: pointer; font: inherit; text-decoration: underline; text-underline-offset: 3px; }
+  body[data-surface="desktop"] .left .bar button:hover { opacity: 0.68; }
+  body[data-surface="desktop"] .left .bar button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  body[data-surface="desktop"] footer .rdct-copy { display: flex; flex-direction: column; gap: 2px; }
+  body[data-surface="desktop"] footer .rdct-copy small { color: var(--fg-subtle); font-size: 11px; }
+  body[data-surface="desktop"] footer .status { min-width: 180px; }
+  body[data-surface="desktop"] footer button:disabled { cursor: default; opacity: 0.45; }
+  body[data-surface="desktop"] footer button:disabled:hover { transform: none; }` : "";
+  const testId = (name: string): string => isDesktop ? ` data-testid="${name}"` : "";
+  const sidMarkup = isDesktop
+    ? ""
+    : `<span id="sid" style="display:none" title="${escapeHtml(t("share.page.copyResume"))}"></span>`;
+  const settingsTitle = t(isDesktop ? "share.desktop.settings" : "share.page.settingsAria");
+  const toolDisplayLabel = `<span class="pref-label">
+          <span>${escapeHtml(t("share.page.toolDisplay"))}</span>
+          <span class="tool-help-wrap">
+            <button type="button" id="tool-help-trigger" class="tool-help-trigger" aria-label="${escapeHtml(t("share.page.toolHelpAria"))}" aria-describedby="tool-help">${infoMark}</button>
+            <span id="tool-help" role="tooltip" class="tool-help-tooltip">
+              <span><strong>${escapeHtml(t("share.page.tool.none"))}</strong> ${escapeHtml(t("share.page.toolHelp.none"))}</span>
+              <span><strong>${escapeHtml(t("share.page.tool.summary"))}</strong> ${escapeHtml(t("share.page.toolHelp.summary"))}</span>
+              <span><strong>${escapeHtml(t("share.page.tool.full"))}</strong> ${escapeHtml(t("share.page.toolHelp.full"))}</span>
+            </span>
+          </span>
+        </span>`;
+  const settingsBody = isDesktop
+    ? `<div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language" aria-label="${escapeHtml(t("share.page.language"))}">${languageOptions}</select></div>
+      <details><summary>${escapeHtml(t("share.desktop.advanced"))}</summary>
+        <div class="prow"><span>${escapeHtml(t("share.desktop.conversationList"))}</span><select id="limit" aria-label="${escapeHtml(t("share.desktop.sessionListLabel"))}">
+          <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
+          <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
+          <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
+        </select></div>
+        <div class="prow">${toolDisplayLabel}<select id="tools" aria-label="${escapeHtml(t("share.desktop.toolDisplayLabel"))}">${toolsOptions}</select></div>
+      </details>
+      <section class="about" aria-label="${escapeHtml(t("share.desktop.about"))}">
+        <h2>${escapeHtml(t("share.desktop.about"))}</h2>
+        ${appVersion ? `<p>${escapeHtml(t("share.desktop.version", { version: appVersion }))}</p>` : ""}
+        <p><a href="https://github.com/kylvia/airgap" target="_blank" rel="noreferrer">${escapeHtml(t("share.desktop.repository"))}</a></p>
+        <p><a href="https://github.com/kylvia/airgap/releases" target="_blank" rel="noreferrer">${escapeHtml(t("share.desktop.downloadPage"))}</a></p>
+      </section>`
+    : `<div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit">
+        <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
+        <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
+        <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
+      </select></div>
+      <div class="prow">${toolDisplayLabel}<select id="tools">${toolsOptions}</select></div>
+      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>`;
+  const settingsMarkup = `<dialog id="prefpanel" tabindex="-1" aria-labelledby="settings-title">
+    <div class="settings-sheet">
+      <div class="settings-head">
+        <h2 id="settings-title">${escapeHtml(settingsTitle)}</h2>
+        <button type="button" id="prefclose" aria-label="${escapeHtml(t("share.page.closeSettings"))}">${escapeHtml(t("share.page.closeSettings"))}</button>
+      </div>
+      ${settingsBody}
+      <p id="settings-status" class="status" role="status" aria-live="polite"></p>
+    </div>
+  </dialog>`;
+  const emptyStateMarkup = isDesktop
+    ? `<section class="empty-state" id="empty-state" data-testid="empty-state" tabindex="-1" aria-labelledby="empty-title" hidden>
+      <div class="empty-card">
+        <h2 id="empty-title">${escapeHtml(t("share.desktop.emptyTitle"))}</h2>
+        <p id="empty-body">${escapeHtml(t("share.desktop.emptyBody"))}</p>
+        <p>${escapeHtml(t("share.desktop.localOnly"))}</p>
+        <button id="empty-recheck">${escapeHtml(t("share.desktop.recheck"))}</button>
+        <a id="permission-help" href="https://github.com/kylvia/airgap" target="_blank" rel="noreferrer" hidden>${escapeHtml(t("share.desktop.permissionHelp"))}</a>
+      </div>
+    </section>`
+    : "";
+  const footerMarkup = isDesktop
+    ? `<footer>
+    <label class="rdct" title="${escapeHtml(t("share.desktop.redactionHint"))}"><input type="checkbox" id="redact" data-testid="redaction-toggle" checked><span class="rdct-copy"><span>${escapeHtml(t("share.desktop.redaction"))}</span><small>${escapeHtml(t("share.desktop.redactionHint"))}</small></span></label>
+    <button data-a="clipboard" data-f="md" data-testid="copy-text" disabled>${escapeHtml(t("share.desktop.copyText"))}</button>
+    <button data-a="save" data-f="png" data-testid="save-image" disabled>${escapeHtml(t("share.desktop.saveImage"))}</button>
+    <span class="status" id="status" role="status" aria-live="polite">${escapeHtml(t("share.desktop.ready"))}</span>
+    <button class="primary" data-a="clipboard" data-f="png" data-testid="copy-image" disabled>${escapeHtml(t("share.desktop.copyImage"))}</button>
+  </footer>`
+    : `<footer>
+    <label class="rdct" title="${escapeHtml(t("share.page.redactHint"))}"><input type="checkbox" id="redact" checked>${escapeHtml(t("share.page.redact"))}</label>
+    <button${primaryCls(isMac)} data-a="clipboard" data-f="png"${clipboardHint}>${escapeHtml(t("share.page.copyImage"))}</button>
+    <button${primaryCls(!isMac)} data-a="download" data-f="png">${escapeHtml(t("share.page.downloadPng"))}</button>
+    <button data-a="clipboard" data-f="md"${clipboardHint}>${escapeHtml(t("share.page.copyMarkdown"))}</button>
+    <button data-a="save" data-f="png">${escapeHtml(t("share.page.saveDesktop"))}</button>
+    <span class="status" id="status">${escapeHtml(statusHint)}</span>
+    <button id="done">${escapeHtml(t("share.page.done"))}</button>
+  </footer>`;
+  const sidScript = isDesktop ? "" : `
+    // 会话 id 胶囊：显示前 8 位，点击复制完整 resume 命令。
+    // 不回到原 workspace 的 resume 只有对话没有文件语境，基本没意义——cwd 已知就拼上 cd。
+    const sid = $("sid");
+    sid.textContent = detail.id.slice(0, 8);
+    sid.style.display = "";
+    sid.onclick = async () => {
+      const resume = (detail.source === "codex" ? "codex resume " : "claude --resume ") + detail.id;
+      const cmd = detail.cwd ? 'cd "' + detail.cwd + '" && ' + resume : resume;
+      try { await navigator.clipboard.writeText(cmd); setStatus(msg("share.page.copied", { command: cmd })); }
+      catch { setStatus(cmd); } // 剪贴板不可用就把命令亮在状态栏，手动抄
+    };`;
+  const doneScript = isDesktop
+    ? ""
+    : `$("done").onclick = async () => { await fetch("/api/close", { method: "POST" }); setStatus(msg("share.page.closed")); };`;
+  const listConfigComment = isDesktop
+    ? "// Change the conversation limit in the shared Airgap settings."
+    : "// 页面上改条数 = 写回 ~/.airgap/config.json（与配置文件同一真源），成功后按新条数重拉列表。";
+  const selectionControlsMarkup = isDesktop
+    ? `<button type="button" id="all" disabled>${escapeHtml(t("share.page.selectAll"))}</button><button type="button" id="none" disabled>${escapeHtml(t("share.page.clear"))}</button>`
+    : `<a id="all">${escapeHtml(t("share.page.selectAll"))}</a><a id="none">${escapeHtml(t("share.page.clear"))}</a>`;
   return `<!DOCTYPE html>
 <html lang="${locale}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escapeHtml(t("share.page.title"))}</title>
+<title>${escapeHtml(t(isDesktop ? "share.desktop.title" : "share.page.title"))}</title>
 <style>
 ${THEME_CSS}
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -78,13 +229,8 @@ ${THEME_CSS}
   header #refresh:hover { border-color: var(--border-strong); background: var(--bg-hover); }
   header #refresh:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   header #refresh:disabled { cursor: wait; opacity: 0.48; }
-  /* 当前会话 id 胶囊：点击复制 resume 命令 */
-  header #sid { font-family: var(--font-mono); font-size: 12px; color: var(--fg-muted);
-    border: 1px solid var(--border); border-radius: var(--radius-tag); padding: 3px 10px;
-    cursor: pointer; user-select: none; white-space: nowrap;
-    transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease); }
-  header #sid:hover { color: var(--fg); border-color: var(--border-strong); }
-  /* 设置入口 + popover：实色 paper 面板（铁律禁半透明材质），hairline 边框方角卡片 */
+${sidCss}
+  /* 设置入口 + 居中模态框：实色 paper 面板、hairline 边框和轻遮罩 */
   header #prefs { margin-left: auto; width: 34px; height: 34px; flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
     border: 1px solid var(--border); border-radius: var(--radius-input);
@@ -92,12 +238,22 @@ ${THEME_CSS}
     transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease); }
   header #prefs:hover { border-color: var(--border-strong); background: var(--bg-hover); }
   header #prefs:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-  #prefpanel { position: absolute; top: calc(100% + 8px); right: 20px; z-index: 20; min-width: 250px;
-    background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius-card);
-    padding: 6px 14px; }
-  #prefpanel[hidden] { display: none; }
+  #prefpanel { width: min(440px, calc(100vw - 32px)); max-height: min(680px, calc(100vh - 32px));
+    margin: auto; padding: 0; overflow: auto; color: var(--fg); background: var(--bg);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-card); }
+  #prefpanel:not([open]) { display: none; }
+  #prefpanel::backdrop { background: rgba(26, 24, 20, 0.28); }
+  #prefpanel .settings-sheet { padding: 18px 20px 20px; }
+  #prefpanel .settings-head { display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle); }
+  #prefpanel .settings-head h2 { font-family: var(--font-serif); font-size: 21px; font-weight: 600;
+    letter-spacing: -0.02em; }
+  #prefpanel #prefclose { border: 0; border-radius: var(--radius-button); padding: 6px 8px;
+    background: transparent; color: var(--fg-muted); font: 500 12px var(--font-sans); cursor: pointer; }
+  #prefpanel #prefclose:hover { color: var(--fg); background: var(--bg-hover); }
+  #prefpanel #prefclose:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   #prefpanel .prow { display: flex; align-items: center; justify-content: space-between; gap: 18px;
-    padding: 9px 0; font-size: 13px; color: var(--fg); }
+    min-height: 48px; font-size: 13px; color: var(--fg); }
   #prefpanel .prow + .prow { border-top: 1px solid var(--border-subtle); }
   #prefpanel .pref-label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
   #prefpanel .tool-help-wrap { position: relative; display: inline-flex; }
@@ -114,6 +270,9 @@ ${THEME_CSS}
   #prefpanel .tool-help-tooltip strong { font-weight: 600; }
   #prefpanel .tool-help-wrap:hover .tool-help-tooltip,
   #prefpanel .tool-help-wrap:focus-within .tool-help-tooltip { visibility: visible; }
+  #prefpanel #settings-status { margin-top: 12px; color: var(--fg-muted); font-size: 12px; line-height: 1.5; }
+  #prefpanel #settings-status:empty { display: none; }
+  #prefpanel #settings-status.err { color: var(--danger); }
   main { flex: 1; display: flex; min-height: 0; position: relative; }
   /* 切换会话/展示级别时盖住内容区：实色纸面（铁律禁半透明材质），品牌 mark 两块交替脉动。
      显隐用 display 硬切（不过渡 opacity/visibility）：headless 截图合成对这类过渡不可靠，且遮罩不需要淡入。 */
@@ -163,65 +322,39 @@ ${THEME_CSS}
   footer .status { flex: 1; font-size: 13px; color: var(--fg-muted); min-width: 200px; }
   footer .status.err { color: var(--danger); }
   .sbanner { background: var(--warning-bg); color: var(--warning-fg); font-size: 12.5px; padding: 8px 18px; border-bottom: 1px solid var(--warning); display: none; align-items: center; gap: 7px; }
+${desktopCss}
 </style>
 </head>
-<body>
+<body${isDesktop ? ' data-surface="desktop"' : ""}>
   <header>
     <span class="logo">${airgapMark(20)}<span>airgap</span></span>
-    <span style="font-size:13px;color:var(--fg-muted)">${escapeHtml(t("share.page.subtitle"))}</span>
-    <select id="sess"></select>
-    <button id="refresh" title="${escapeHtml(t("share.page.refresh"))}" aria-label="${escapeHtml(t("share.page.refresh"))}">${refreshMark}</button>
-    <span id="sid" style="display:none" title="${escapeHtml(t("share.page.copyResume"))}"></span>
-    <button id="prefs" title="${escapeHtml(t("share.page.settings"))}" aria-label="${escapeHtml(t("share.page.settingsAria"))}">${prefsMark}</button>
-    <div id="prefpanel" hidden>
-      <div class="prow"><span>${escapeHtml(t("share.page.sessionList"))}</span><select id="limit">
-        <option value="10">${escapeHtml(t("share.page.recent", { count: 10 }))}</option>
-        <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
-        <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
-      </select></div>
-      <div class="prow">
-        <span class="pref-label">
-          <span>${escapeHtml(t("share.page.toolDisplay"))}</span>
-          <span class="tool-help-wrap">
-            <button type="button" id="tool-help-trigger" class="tool-help-trigger" aria-label="${escapeHtml(t("share.page.toolHelpAria"))}" aria-describedby="tool-help">${infoMark}</button>
-            <span id="tool-help" role="tooltip" class="tool-help-tooltip">
-              <span><strong>${escapeHtml(t("share.page.tool.none"))}</strong> ${escapeHtml(t("share.page.toolHelp.none"))}</span>
-              <span><strong>${escapeHtml(t("share.page.tool.summary"))}</strong> ${escapeHtml(t("share.page.toolHelp.summary"))}</span>
-              <span><strong>${escapeHtml(t("share.page.tool.full"))}</strong> ${escapeHtml(t("share.page.toolHelp.full"))}</span>
-            </span>
-          </span>
-        </span>
-        <select id="tools">${toolsOptions}</select>
-      </div>
-      <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>
-    </div>
+    <span style="font-size:13px;color:var(--fg-muted)">${escapeHtml(t(isDesktop ? "share.desktop.title" : "share.page.subtitle"))}</span>
+    <select id="sess"${testId("conversation-picker")}${isDesktop ? ` aria-label="${escapeHtml(t("share.desktop.conversationPicker"))}" disabled` : ""}></select>
+    <button id="refresh"${testId("refresh")} title="${escapeHtml(t(isDesktop ? "share.desktop.recheck" : "share.page.refresh"))}" aria-label="${escapeHtml(t(isDesktop ? "share.desktop.recheck" : "share.page.refresh"))}">${refreshMark}</button>
+    ${sidMarkup}
+    <button id="prefs"${testId("settings")} aria-expanded="false" aria-controls="prefpanel" title="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settings"))}" aria-label="${escapeHtml(t(isDesktop ? "share.desktop.settings" : "share.page.settingsAria"))}">${prefsMark}</button>
+    ${settingsMarkup}
   </header>
   <div class="sbanner" id="sbanner"></div>
   <main>
     <div class="loading" id="loading">${airgapMark(26)}<span>${escapeHtml(t("share.page.loadingContent"))}</span></div>
+    ${emptyStateMarkup}
     <div class="left">
       <div class="bar">
-        <a id="all">${escapeHtml(t("share.page.selectAll"))}</a><a id="none">${escapeHtml(t("share.page.clear"))}</a>
+        ${selectionControlsMarkup}
         <span id="count" style="margin-left:auto"></span>
       </div>
-      <div class="list" id="list"></div>
+      <div class="list" id="list"${testId("turn-list")}></div>
     </div>
-    <div class="right"><iframe id="preview"></iframe></div>
+    <div class="right"><iframe id="preview"${testId("preview")}${isDesktop ? ` title="${escapeHtml(t("share.desktop.previewLabel"))}"` : ""}></iframe></div>
   </main>
-  <footer>
-    <label class="rdct" title="${escapeHtml(t("share.page.redactHint"))}"><input type="checkbox" id="redact" checked>${escapeHtml(t("share.page.redact"))}</label>
-    <button${primaryCls(isMac)} data-a="clipboard" data-f="png"${clipboardHint}>${escapeHtml(t("share.page.copyImage"))}</button>
-    <button${primaryCls(!isMac)} data-a="download" data-f="png">${escapeHtml(t("share.page.downloadPng"))}</button>
-    <button data-a="clipboard" data-f="md"${clipboardHint}>${escapeHtml(t("share.page.copyMarkdown"))}</button>
-    <button data-a="save" data-f="png">${escapeHtml(t("share.page.saveDesktop"))}</button>
-    <span class="status" id="status">${escapeHtml(statusHint)}</span>
-    <button id="done">${escapeHtml(t("share.page.done"))}</button>
-  </footer>
+  ${footerMarkup}
 <script>
 const CHAT_CSS = ${chatCss};
 const DEFAULT = ${def};
 const LOCALE = ${JSON.stringify(locale)};
 const LANGUAGE_PREFERENCE = ${JSON.stringify(languagePreference)};
+const SURFACE = ${JSON.stringify(surface)};
 const M = ${serializeForScript(messages)};
 function msg(key, params = {}) {
   const singularKey = params.count === 1 ? key + ".one" : "";
@@ -234,17 +367,102 @@ const WARN_MARK = ${JSON.stringify(warnMark)};
 let detail = null;            // 当前会话 {id,title,date,turns:[]}
 const selected = new Set();   // 选中的轮次 index
 let pvReady = false;          // 预览 iframe 是否已加载好
+let discoveryIssueMessage = null;
+let exportInFlight = false;
+const inFlight = { bootstrap: 0, refresh: 0, load: 0, export: 0, settings: 0 };
 
 const $ = (id) => document.getElementById(id);
-function setStatus(msg, err) { const s = $("status"); s.textContent = msg; s.className = "status" + (err ? " err" : ""); }
+const panel = $("prefpanel");
+const button = $("prefs");
+let pendingPreferencesFocusRestore = false;
+
+function setStatus(msg, err) {
+  const className = "status" + (err ? " err" : "");
+  const status = $("status");
+  status.textContent = msg;
+  status.className = className;
+  if (panel.open) {
+    const dialogStatus = $("settings-status");
+    dialogStatus.textContent = msg;
+    dialogStatus.className = className;
+  }
+}
+
+function setSelectionControlsDisabled(disabled) {
+  if (SURFACE !== "desktop") return;
+  for (const id of ["all", "none"]) {
+    const control = $(id);
+    control.disabled = disabled;
+  }
+}
+
+function interactionBusy() {
+  return Object.values(inFlight).some((count) => count > 0);
+}
+
+function renderInteractionState() {
+  const busy = interactionBusy();
+  const picker = $("sess");
+  picker.disabled = busy || picker.options.length === 0;
+  for (const button of document.querySelectorAll("footer button[data-a]")) {
+    button.disabled = busy || !detail;
+  }
+  setSelectionControlsDisabled(busy || !detail);
+  $("refresh").disabled = busy;
+  $("prefs").disabled = busy;
+  $("redact").disabled = busy;
+  for (const id of ["limit", "tools", "language"]) $(id).disabled = busy;
+  for (const checkbox of document.querySelectorAll("#list input[type=checkbox]")) checkbox.disabled = busy;
+  const emptyRecheck = $("empty-recheck");
+  if (emptyRecheck) emptyRecheck.disabled = busy;
+  if (!busy && !panel.open && pendingPreferencesFocusRestore) {
+    pendingPreferencesFocusRestore = false;
+    button.focus();
+  }
+}
+
+function beginInteraction(kind) {
+  inFlight[kind] += 1;
+  renderInteractionState();
+}
+
+function endInteraction(kind) {
+  inFlight[kind] = Math.max(0, inFlight[kind] - 1);
+  renderInteractionState();
+}
+
+function setEmptyStateVisible(state, visible) {
+  state.hidden = !visible;
+  setSelectionControlsDisabled(visible || !detail);
+}
+
+function desktopExportMessage(action, format, ok, code) {
+  if (SURFACE !== "desktop") return null;
+  if (!ok && code === "EXPORT_IMAGE_TOO_LARGE") return msg("share.desktop.imageTooLarge");
+  if (!ok && code === "EXPORT_CAPTURE_FAILED") return msg("share.desktop.imageFailed");
+  if (!ok && code === "EXPORT_CLIPBOARD_FAILED") {
+    return msg(format === "md" ? "share.desktop.copyTextFailed" : "share.desktop.copyImageFailed");
+  }
+  if (!ok && code === "EXPORT_SAVE_FAILED") return msg("share.desktop.saveImageFailed");
+  if (action === "clipboard" && format === "md") return msg(ok ? "share.desktop.copyTextSuccess" : "share.desktop.copyTextFailed");
+  if (action === "clipboard" && format === "png") return msg(ok ? "share.desktop.copyImageSuccess" : "share.desktop.copyImageFailed");
+  if (action === "save" && format === "png") return msg(ok ? "share.desktop.saveImageSuccess" : "share.desktop.saveImageFailed");
+  return ok ? msg("share.desktop.ready") : msg("share.desktop.imageFailed");
+}
+
+function desktopSettingsError() { return msg("share.desktop.settingsSaveFailed"); }
+
+function providerName(source) { return source === "claude" ? "Claude Code" : "Codex"; }
 
 function fillOptions(sessions, keep) {
   const sel = $("sess"); sel.innerHTML = "";
   for (const s of sessions) {
     const o = document.createElement("option");
     o.value = s.id;
-    // 标题优先（区分度最高）；无标题（codex / 未生成）回退项目名。id 前缀对 UI 没有区分价值，不再展示。
-    o.textContent = (s.title || s.project + " · " + msg("share.page.fallbackTitle")) + " · " + s.source + " · " + rel(s.mtimeMs);
+    // 桌面用户只看到项目、产品和相对时间；内部 id 仍只作为 option value 使用。
+    o.textContent = SURFACE === "desktop"
+      ? msg("share.desktop.conversationLabel", { project: s.project, provider: providerName(s.source), time: rel(s.mtimeMs) })
+      : (s.title || s.project + " · " + msg("share.page.fallbackTitle")) + " · " + s.source + " · " + rel(s.mtimeMs);
     sel.appendChild(o);
   }
   if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
@@ -262,64 +480,179 @@ function syncLimitSelect(limit) {
 }
 
 async function loadSessions() {
-  const r = await fetch("/api/sessions"); const { sessions, limit } = await r.json();
-  fillOptions(sessions, null);
-  syncLimitSelect(limit);
-  const sel = $("sess");
-  const pick = sessions.find((s) => s.id.startsWith(DEFAULT)) || sessions[0];
-  if (pick) { sel.value = pick.id; await loadSession(pick.id); }
-  sel.onchange = () => loadSession(sel.value);
+  beginInteraction("bootstrap");
+  try {
+    const r = await fetch("/api/sessions");
+    if (!r.ok) throw new Error("sessions request failed");
+    const { sessions, limit, issues = [] } = await r.json();
+    fillOptions(sessions, null);
+    syncLimitSelect(limit);
+    showDiscoveryState(sessions, issues);
+    const sel = $("sess");
+    const pick = sessions.find((s) => s.id.startsWith(DEFAULT)) || sessions[0];
+    if (pick) { sel.value = pick.id; await loadSession(pick.id); }
+    sel.onchange = () => { if (!interactionBusy()) loadSession(sel.value); };
+  } catch (error) {
+    if (SURFACE === "desktop") showStartupError();
+    else throw error;
+  } finally {
+    endInteraction("bootstrap");
+  }
+}
+
+function discoveryDiagnostic(issue) {
+  return msg("share.desktop.permissionError", {
+    provider: issue.provider || providerName(issue.source),
+    path: issue.path,
+  });
+}
+
+function showDiscoveryState(sessions, issues) {
+  if (SURFACE !== "desktop") return;
+  const state = $("empty-state");
+  const title = $("empty-title");
+  const body = $("empty-body");
+  const help = $("permission-help");
+  const issue = issues[0];
+  discoveryIssueMessage = issue ? discoveryDiagnostic(issue) : null;
+  if (issue) {
+    const message = discoveryIssueMessage;
+    if (sessions.length > 0) {
+      setEmptyStateVisible(state, false);
+      setStatus(message, true);
+    } else {
+      setEmptyStateVisible(state, true);
+      title.textContent = issue.provider || providerName(issue.source);
+      body.textContent = message;
+      help.hidden = false;
+      state.focus();
+    }
+    return;
+  }
+  help.hidden = true;
+  title.textContent = msg("share.desktop.emptyTitle");
+  body.textContent = msg("share.desktop.emptyBody");
+  setEmptyStateVisible(state, sessions.length === 0);
+  if (!state.hidden) state.focus();
+}
+
+function showStartupError() {
+  if (SURFACE !== "desktop") return;
+  const state = $("empty-state");
+  setEmptyStateVisible(state, true);
+  $("empty-title").textContent = msg("share.desktop.startupError");
+  $("empty-body").textContent = msg("share.desktop.localOnly");
+  $("permission-help").hidden = true;
+  state.focus();
 }
 
 // ai-title 会随会话演进被 Claude 持续更新——窗口重获焦点时（从 Claude Code 切回来的瞬间）
 // 静默刷新下拉标题/排序，保持当前选中与预览不动。5s 节流，防止频繁切窗口反复全量扫标题。
 let lastListRefresh = 0;
+function clearCurrentConversation() {
+  detail = null;
+  selected.clear();
+  pvReady = false;
+  $("list").innerHTML = "";
+  $("count").textContent = "";
+  $("sbanner").style.display = "none";
+  const preview = $("preview");
+  preview.onload = null;
+  preview.srcdoc = "";
+  renderInteractionState();
+}
+
 async function refreshSessions() {
-  const q = detail ? "?ensure=" + encodeURIComponent(detail.id) : "";
-  const r = await fetch("/api/sessions" + q);
-  if (!r.ok) return false;
-  const data = await r.json();
-  fillOptions(data.sessions, detail ? detail.id : null);
-  syncLimitSelect(data.limit);
-  return true;
+  beginInteraction("refresh");
+  try {
+    const q = detail ? "?ensure=" + encodeURIComponent(detail.id) : "";
+    const r = await fetch("/api/sessions" + q);
+    if (!r.ok) return "failed";
+    const data = await r.json();
+    if (SURFACE === "desktop" && detail && data.issues && data.issues.length > 0) {
+      discoveryIssueMessage = discoveryDiagnostic(data.issues[0]);
+      setStatus(discoveryIssueMessage, true);
+      return "diagnostic";
+    }
+    if (SURFACE === "desktop" && detail && !data.sessions.some((session) => session.id === detail.id)) {
+      discoveryIssueMessage = null;
+      setStatus(msg("share.desktop.currentUnavailable"), true);
+      clearCurrentConversation();
+      fillOptions(data.sessions, null);
+      syncLimitSelect(data.limit);
+      showDiscoveryState(data.sessions, data.issues || []);
+      const replacement = data.sessions[0];
+      if (replacement) {
+        $("sess").value = replacement.id;
+        await loadSession(replacement.id);
+      }
+      return "replaced";
+    }
+    fillOptions(data.sessions, detail ? detail.id : null);
+    syncLimitSelect(data.limit);
+    showDiscoveryState(data.sessions, data.issues || []);
+    return "ok";
+  } finally {
+    endInteraction("refresh");
+  }
 }
 let manualRefreshInFlight = false;
 async function refreshCurrentSession() {
-  if (manualRefreshInFlight) return;
+  if (manualRefreshInFlight || interactionBusy()) return;
   manualRefreshInFlight = true;
   const button = $("refresh");
-  button.disabled = true;
   button.setAttribute("aria-busy", "true");
   try {
-    if (!await refreshSessions()) {
-      setStatus(msg("share.page.refreshListFailed"), true);
+    const refreshResult = await refreshSessions();
+    if (refreshResult === "diagnostic" || refreshResult === "replaced") return;
+    if (refreshResult === "failed") {
+      setStatus(msg(SURFACE === "desktop" ? "share.desktop.refreshListFailed" : "share.page.refreshListFailed"), true);
       return;
     }
     if (!detail) {
-      setStatus(msg("share.page.listRefreshed"));
+      if (SURFACE === "desktop" && $("sess").value) {
+        await loadSession($("sess").value);
+        return;
+      }
+      setStatus(msg(SURFACE === "desktop" ? "share.desktop.listRefreshed" : "share.page.listRefreshed"));
       return;
     }
-    await loadSession(detail.id, true, msg("share.page.sessionRefreshed"));
+    await loadSession(detail.id, true, msg(SURFACE === "desktop" ? "share.desktop.conversationRefreshed" : "share.page.sessionRefreshed"));
   } catch {
-    setStatus(msg("share.page.refreshFailed"), true);
+    setStatus(msg(SURFACE === "desktop" ? "share.desktop.refreshFailed" : "share.page.refreshFailed"), true);
   } finally {
-    button.disabled = false;
     button.removeAttribute("aria-busy");
     manualRefreshInFlight = false;
   }
 }
 $("refresh").onclick = () => { refreshCurrentSession(); };
-// 页面上改条数 = 写回 ~/.airgap/config.json（与配置文件同一真源），成功后按新条数重拉列表。
+$("empty-recheck") && ($("empty-recheck").onclick = () => { refreshCurrentSession(); });
+${listConfigComment}
 $("limit").onchange = async () => {
-  const n = Number($("limit").value);
-  const r = await fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionListLimit: n }) });
-  const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.saveFailed") }));
-  if (!res.ok) { setStatus(res.message || msg("share.page.saveFailed"), true); return; }
-  setStatus(msg("share.page.listSaved", { count: res.limit }));
-  await refreshSessions();
+  if (interactionBusy()) return;
+  beginInteraction("settings");
+  try {
+    const n = Number($("limit").value);
+    const r = await fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionListLimit: n }) });
+    const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.saveFailed") }));
+    if (!res.ok) {
+      setStatus(SURFACE === "desktop" ? desktopSettingsError() : res.message || msg("share.page.saveFailed"), true);
+      return;
+    }
+    setStatus(SURFACE === "desktop"
+      ? msg("share.desktop.listRefreshed")
+      : msg("share.page.listSaved", { count: res.limit }));
+    await refreshSessions();
+  } catch {
+    setStatus(SURFACE === "desktop" ? desktopSettingsError() : msg("share.page.saveFailed"), true);
+  } finally {
+    endInteraction("settings");
+  }
 };
-window.addEventListener("focus", () => {
-  if (manualRefreshInFlight || Date.now() - lastListRefresh < 5000) return;
+const resumeEvent = SURFACE === "desktop" ? "airgap-native-focus" : "visibilitychange";
+window.addEventListener(resumeEvent, () => {
+  if (resumeEvent === "visibilitychange" && document.visibilityState !== "visible") return;
+  if (manualRefreshInFlight || interactionBusy() || Date.now() - lastListRefresh < 5000) return;
   lastListRefresh = Date.now();
   refreshSessions().catch(() => {});
 });
@@ -336,10 +669,16 @@ function rel(ms) {
 function setLoading(on) { $("loading").classList.toggle("on", !!on); }
 
 async function loadSession(id, keepSelection, refreshedStatus) {
+  const previousId = detail ? detail.id : null;
+  beginInteraction("load");
   setStatus(msg("share.page.loading")); setLoading(true);
   try {
     const r = await fetch("/api/session/" + encodeURIComponent(id) + "?tools=" + encodeURIComponent($("tools").value));
-    if (!r.ok) { setStatus(msg("share.page.loadFailed"), true); return false; }
+    if (!r.ok) {
+      if (previousId) $("sess").value = previousId;
+      setStatus(msg(SURFACE === "desktop" ? "share.desktop.loadFailed" : "share.page.loadFailed"), true);
+      return false;
+    }
     detail = await r.json();
     if (!keepSelection) {
       selected.clear();
@@ -350,26 +689,19 @@ async function loadSession(id, keepSelection, refreshedStatus) {
       for (const index of selected) if (!available.has(index)) selected.delete(index);
     }
     renderList(); buildPreviewShell();
-    // 会话 id 胶囊：显示前 8 位，点击复制完整 resume 命令。
-    // 不回到原 workspace 的 resume 只有对话没有文件语境，基本没意义——cwd 已知就拼上 cd。
-    const sid = $("sid");
-    sid.textContent = detail.id.slice(0, 8);
-    sid.style.display = "";
-    sid.onclick = async () => {
-      const resume = (detail.source === "codex" ? "codex resume " : "claude --resume ") + detail.id;
-      const cmd = detail.cwd ? 'cd "' + detail.cwd + '" && ' + resume : resume;
-      try { await navigator.clipboard.writeText(cmd); setStatus(msg("share.page.copied", { command: cmd })); }
-      catch { setStatus(cmd); } // 剪贴板不可用就把命令亮在状态栏，手动抄
-    };
-    setStatus(keepSelection
+${sidScript}
+    if (discoveryIssueMessage) setStatus(discoveryIssueMessage, true);
+    else setStatus(keepSelection
       ? refreshedStatus || msg("share.page.toolRefreshed")
       : msg("share.page.loadedSummary", { turns: detail.turns.length, selected: selected.size }));
     return true;
   } catch {
-    setStatus(msg("share.page.loadClosed"), true);
+    if (previousId) $("sess").value = previousId;
+    setStatus(msg(SURFACE === "desktop" ? "share.desktop.startupError" : "share.page.loadClosed"), true);
     return false;
   } finally {
     setLoading(false);
+    endInteraction("load");
   }
 }
 
@@ -379,17 +711,22 @@ function renderList() {
     // div 而非 label：行正文点击=预览定位查看，勾选只属于 checkbox 本身——两个动作解绑。
     const row = document.createElement("div"); row.className = "row";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = selected.has(t.index);
+    cb.disabled = interactionBusy();
     cb.setAttribute("aria-label", msg("share.page.selectTurn", { index: t.index }));
-    cb.onchange = () => { cb.checked ? selected.add(t.index) : selected.delete(t.index); syncPreview(cb.checked ? t.index : null); updateCount(); };
+    cb.onchange = () => { if (interactionBusy()) return; cb.checked ? selected.add(t.index) : selected.delete(t.index); syncPreview(cb.checked ? t.index : null); updateCount(); };
     // 行点击只对已勾选轮定位滚动；未勾选轮不在预览里（预览=导出），给一句状态提示防「点了没反应」。
     row.onclick = (e) => {
+      if (interactionBusy()) return;
       if (e.target === cb) return;
       if (selected.has(t.index)) syncPreview(t.index);
       else setStatus(msg("share.page.unselectedTurn", { index: t.index }));
     };
     const body = document.createElement("div"); body.className = "body";
     const top = document.createElement("div"); top.className = "top";
-    top.innerHTML = '<span class="idx">' + msg("share.page.turnLabel", { index: t.index }) + '</span><span class="prev"></span>'
+    const roles = SURFACE === "desktop"
+      ? '<span class="roles">' + [msg("share.desktop.role.me"), t.html.includes('class="msg-ai"') ? msg("share.desktop.role.assistant") : "", t.html.includes('class="tool') ? msg("share.desktop.role.tool") : ""].filter(Boolean).join(" · ") + '</span>'
+      : "";
+    top.innerHTML = roles + '<span class="idx">' + msg("share.page.turnLabel", { index: t.index }) + '</span><span class="prev"></span>'
       + (t.tag ? '<span class="tag">' + t.tag + '</span>' : '')
       + (t.findings > 0 ? '<span class="warn">' + WARN_MARK + msg("share.page.findingCount", { count: t.findings }) + '</span>' : '');
     top.querySelector(".prev").textContent = t.preview;
@@ -447,6 +784,18 @@ function syncPreview(scrollTo) {
 function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
 async function doExport(action, format, acceptRisk) {
+  if (exportInFlight) return;
+  exportInFlight = true;
+  beginInteraction("export");
+  try {
+    return await performExport(action, format, acceptRisk);
+  } finally {
+    exportInFlight = false;
+    endInteraction("export");
+  }
+}
+
+async function performExport(action, format, acceptRisk) {
   if (!detail || selected.size === 0) { setStatus(msg("share.page.selectOne"), true); return; }
   const redact = $("redact").checked;
   const risky = detail.turns.filter((t) => selected.has(t.index) && t.findings > 0);
@@ -457,43 +806,79 @@ async function doExport(action, format, acceptRisk) {
   const turns = [...selected].sort((a, b) => a - b);
   setStatus(redact ? msg("share.page.redacting") : msg("share.page.processing"));
   const body = JSON.stringify({ sessionId: detail.id, turns, format, action, redact, acceptRisk: accept, tools: $("tools").value });
-  const r = await fetch("/api/export", { method: "POST", headers: { "content-type": "application/json" }, body });
-  if (action === "download" && r.ok && r.headers.get("content-type") === "image/png") {
-    const blob = await r.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "airgap-share.png";
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    setStatus(redact ? msg("share.page.downloadedRedacted") : msg("share.page.downloaded")); return;
+  try {
+    const r = await fetch("/api/export", { method: "POST", headers: { "content-type": "application/json" }, body });
+    if (action === "download" && r.ok && r.headers.get("content-type") === "image/png") {
+      const blob = await r.blob(); const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "airgap-share.png";
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      setStatus(redact ? msg("share.page.downloadedRedacted") : msg("share.page.downloaded")); return;
+    }
+    const res = await r.json();
+    // 服务端拦截（原样导出且命中，或有人绕过 UI）：确认后带 acceptRisk 重试一次。
+    if (r.status === 409 && res.blocked) {
+      if (confirm(res.message + "\\n" + msg("share.page.confirmAgain"))) return performExport(action, format, true);
+      setStatus(msg("share.page.cancelled"), true); return;
+    }
+    // 原生保存框取消是一次无结果的用户选择，不应被说成成功或失败，也不改变当前勾选。
+    if (res.code === "EXPORT_CANCELLED") { setStatus(msg("share.page.cancelled")); return; }
+    setStatus(desktopExportMessage(action, format, res.ok, res.code) || res.message, !res.ok);
+  } catch (error) {
+    const message = desktopExportMessage(action, format, false);
+    if (message) setStatus(message, true);
+    else throw error;
   }
-  const res = await r.json();
-  // 服务端拦截（原样导出且命中，或有人绕过 UI）：确认后带 acceptRisk 重试一次。
-  if (r.status === 409 && res.blocked) {
-    if (confirm(res.message + "\\n" + msg("share.page.confirmAgain"))) return doExport(action, format, true);
-    setStatus(msg("share.page.cancelled"), true); return;
-  }
-  setStatus(res.message, !res.ok);
 }
 
 for (const btn of document.querySelectorAll("footer button[data-a]")) {
   btn.onclick = () => doExport(btn.dataset.a, btn.dataset.f);
 }
-$("all").onclick = () => { for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
-$("none").onclick = () => { selected.clear(); renderList(); updateCount(); syncPreview(null); };
-// 设置面板开关：点按钮 toggle；点面板外或按 Esc 关闭（面板内点击冒泡到 document 时被 contains 放行）。
-$("prefs").onclick = (e) => { e.stopPropagation(); const p = $("prefpanel"); p.hidden = !p.hidden; };
-document.addEventListener("click", (e) => { const p = $("prefpanel"); if (!p.hidden && !p.contains(e.target)) p.hidden = true; });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("prefpanel").hidden = true; });
+$("all").onclick = () => { if (!detail || interactionBusy()) return; for (const t of detail.turns) selected.add(t.index); renderList(); updateCount(); syncPreview(null); };
+$("none").onclick = () => { if (!detail || interactionBusy()) return; selected.clear(); renderList(); updateCount(); syncPreview(null); };
+function openPreferences() {
+  if (panel.open || interactionBusy()) return;
+  panel.showModal();
+  button.setAttribute("aria-expanded", "true");
+  panel.focus();
+}
+
+function closePreferences() {
+  if (panel.open) panel.close();
+}
+
+button.onclick = openPreferences;
+$("prefclose").onclick = closePreferences;
+panel.onclick = (event) => {
+  if (event.target === panel) closePreferences();
+};
+panel.addEventListener("close", () => {
+  button.setAttribute("aria-expanded", "false");
+  if (button.disabled) {
+    pendingPreferencesFocusRestore = true;
+    return;
+  }
+  pendingPreferencesFocusRestore = false;
+  button.focus();
+});
 // 切换工具展示级别：服务端按新级别重渲各轮片段（预览=导出，物理裁剪而非 CSS 隐藏），保留已勾选轮次；
 // 同时静默持久化到 config.json——先等预览刷新（用户在等它），保存失败的提示最后落地不被刷新提示覆盖。
 $("tools").onchange = async () => {
-  const save = fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ toolDisplay: $("tools").value }) })
-    .then((r) => r.json()).catch(() => ({ ok: false, message: msg("share.page.toolSaveFailed") }));
-  if (detail) await loadSession(detail.id, true);
-  const res = await save;
-  if (!res.ok) setStatus(res.message || msg("share.page.toolSaveFailed"), true);
+  if (interactionBusy()) return;
+  beginInteraction("settings");
+  try {
+    const save = fetch("/api/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ toolDisplay: $("tools").value }) })
+      .then((r) => r.json()).catch(() => ({ ok: false, message: msg("share.page.toolSaveFailed") }));
+    if (detail) await loadSession(detail.id, true);
+    const res = await save;
+    if (!res.ok) setStatus(SURFACE === "desktop" ? desktopSettingsError() : res.message || msg("share.page.toolSaveFailed"), true);
+  } finally {
+    endInteraction("settings");
+  }
 };
 $("language").onchange = async () => {
+  if (interactionBusy()) return;
+  beginInteraction("settings");
   const select = $("language");
-  select.disabled = true;
   try {
     const r = await fetch("/api/config", {
       method: "POST",
@@ -503,18 +888,18 @@ $("language").onchange = async () => {
     const res = await r.json().catch(() => ({ ok: false, message: msg("share.page.languageSaveFailed") }));
     if (!res.ok) {
       select.value = LANGUAGE_PREFERENCE;
-      setStatus(res.message || msg("share.page.languageSaveFailed"), true);
+      setStatus(SURFACE === "desktop" ? desktopSettingsError() : res.message || msg("share.page.languageSaveFailed"), true);
       return;
     }
     window.location.reload();
   } catch {
     select.value = LANGUAGE_PREFERENCE;
-    setStatus(msg("share.page.languageSaveFailed"), true);
+    setStatus(SURFACE === "desktop" ? desktopSettingsError() : msg("share.page.languageSaveFailed"), true);
   } finally {
-    select.disabled = false;
+    endInteraction("settings");
   }
 };
-$("done").onclick = async () => { await fetch("/api/close", { method: "POST" }); setStatus(msg("share.page.closed")); };
+${doneScript}
 
 loadSessions();
 </script>

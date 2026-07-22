@@ -6,7 +6,7 @@
 
 **Architecture:** Add a private npm workspace under `apps/desktop`; keep the published root CLI package unchanged through its existing `files` allowlist. Electron main owns lifecycle, the authenticated loopback server, BrowserWindow, capture, clipboard, and save dialog. The sandboxed renderer is the existing shared Share page and has no Node or IPC bridge.
 
-**Tech Stack:** Electron 43.1.0, Electron Forge 7.11.2, TypeScript, tsup, Vitest, macOS APIs exposed by Electron.
+**Tech Stack:** Electron 43.1.0, Electron Forge 8.0.0-alpha.10, TypeScript, tsup, Vitest, macOS APIs exposed by Electron.
 
 ---
 
@@ -23,12 +23,12 @@
 
 ```sh
 npm view electron@43.1.0 name version repository engines time.43.1.0 scripts
-npm view @electron-forge/cli@7.11.2 name version repository engines time.7.11.2 scripts
-npm view @electron-forge/maker-dmg@7.11.2 name version repository engines time.7.11.2 scripts
-npm view @electron-forge/maker-zip@7.11.2 name version repository engines time.7.11.2 scripts
+npm view @electron-forge/cli@8.0.0-alpha.10 name version repository engines time.8.0.0-alpha.10 scripts
+npm view @electron-forge/maker-dmg@8.0.0-alpha.10 name version repository engines time.8.0.0-alpha.10 scripts
+npm view @electron-forge/maker-zip@8.0.0-alpha.10 name version repository engines time.8.0.0-alpha.10 scripts
 ```
 
-Confirm each package is from the official Electron GitHub organization and has been public for at least seven days. Electron's install step downloads its pinned runtime from Electron GitHub Releases; record any newly reported install script before approving it. If any fact differs, stop and update this plan rather than silently selecting `latest`.
+Confirm each package is from the official Electron GitHub organization and has been public for at least seven days. Forge 8 alpha.10 is deliberately pinned because the latest stable 7.11.2 build chain resolves to a critical vulnerable `node-tar`; the alpha is development-only, was published on 2026-07-02, and must pass audit plus real package/make verification before release. Record the published lifecycle scripts and binaries before approving it. Electron 43.1.0 publishes no npm lifecycle script; it exposes the `electron` and `install-electron` binaries and downloads its pinned runtime on first development invocation, as documented by Electron. If any fact differs, stop and update this plan rather than silently selecting `latest`.
 - [ ] Add `"workspaces": ["apps/desktop"]` to the root package. Keep the existing root `files` list unchanged so `npm pack --dry-run` still excludes `apps/desktop`.
 - [ ] Add root scripts:
 
@@ -56,16 +56,16 @@ Confirm each package is from the official Electron GitHub organization and has b
     "make": "npm run build && electron-forge make --arch=arm64"
   },
   "devDependencies": {
-    "@electron-forge/cli": "7.11.2",
-    "@electron-forge/maker-dmg": "7.11.2",
-    "@electron-forge/maker-zip": "7.11.2",
+    "@electron-forge/cli": "8.0.0-alpha.10",
+    "@electron-forge/maker-dmg": "8.0.0-alpha.10",
+    "@electron-forge/maker-zip": "8.0.0-alpha.10",
     "electron": "43.1.0"
   }
 }
 ```
 
 - [ ] Make the desktop TypeScript config extend `../../tsconfig.json`, set `rootDir` to `../..`, and include `src/**/*.ts` plus `test/**/*.ts`. Configure Forge with `packagerConfig.asar: true`, the DMG and ZIP makers, and no publisher yet; signing is added only in the release plan.
-- [ ] Run `npm install` once to update the root lockfile, then run `npm ls electron @electron-forge/cli @electron-forge/maker-dmg @electron-forge/maker-zip` and confirm the exact versions.
+- [ ] Run `npm install` once to update the root lockfile, then run `npm ls electron @electron-forge/cli @electron-forge/maker-dmg @electron-forge/maker-zip` and confirm the exact versions. Run `npx electron --version` to trigger and verify the pinned runtime download; do not describe that download as an npm install script.
 - [ ] Run `npm pack --dry-run` and confirm no `apps/desktop` path appears.
 - [ ] Commit only the five task files with `build: scaffold desktop workspace`.
 
@@ -73,6 +73,7 @@ Confirm each package is from the official Electron GitHub organization and has b
 
 **Files:**
 - Create: `apps/desktop/src/app-controller.ts`
+- Create: `apps/desktop/src/startup-error.ts`
 - Create: `apps/desktop/test/app-controller.test.ts`
 - Create: `apps/desktop/vitest.config.ts`
 
@@ -87,6 +88,9 @@ export interface DesktopWindow {
   isDestroyed(): boolean;
   once(event: "ready-to-show" | "closed", listener: () => void): void;
   loadURL(url: string): Promise<void>;
+  setAllowedOrigin(origin: string): void;
+  clearNavigationHistory(): void;
+  showStartupError(actions: { retry(): void; quit(): void }): Promise<void>;
 }
 
 export interface DesktopRuntime {
@@ -98,10 +102,13 @@ export interface DesktopRuntime {
 }
 ```
 
-- [ ] Write failing tests for first launch, second-launch focus, service startup failure with retry/quit actions, last-window shutdown, and simultaneous retry/close. Assert exactly one service and one window exist at any time.
-- [ ] Include a shutdown-order test that records `exportCoordinator.whenIdle`, `server.close`, `window closed`, and `runtime.quit`; require the service port to be released before `quit()`.
+- [ ] Add a synchronous `AppController.acquire()` entry point as the single owner of `acquireSingleInstanceLock()` and the `second-instance` listener. A failed lock quits immediately and creates neither a server nor a window; `main.ts` must not acquire the lock a second time.
+- [ ] Write failing tests for first launch, second-launch focus, service startup failure with retry/quit actions, last-window shutdown, and simultaneous retry/close. Assert exactly one service and one window exist at any time. Cover `loadURL` plus `ready-to-show` ordering, hidden-window second-instance focus, and navigation-history clearing after the bootstrap redirect.
+- [ ] Render the startup failure as a bundled local document from `startup-error.ts`; expose Retry/Quit through the injected window port so tests do not need Electron globals or a preload bridge. A healthy server whose page load failed is reused on Retry rather than duplicated.
+- [ ] Include a shutdown-order test that records `server.close`, both `server.whenExportsIdle` barriers, `window closed`, and `runtime.quit`; require the service port to be released and in-flight exports to settle before `quit()` even if close rejects.
 - [ ] Run `npm run desktop:test -- app-controller.test.ts` and confirm failures.
 - [ ] Implement an explicit state machine with states `starting`, `ready`, `closing`, and `closed`. Cache the startup and shutdown promises so reentrant calls share one operation.
+- [ ] On shutdown, start `server.close()` first so no new export request can enter, await it together with the first `server.whenExportsIdle()`, then run `server.whenExportsIdle()` once more as a terminal barrier before calling `runtime.quit()`.
 - [ ] Start the shared server with exactly these desktop policies:
 
 ```ts
@@ -114,7 +121,7 @@ await startShareServer({
 });
 ```
 
-- [ ] Load only `server.entryUrl`, wait for `ready-to-show`, then show the window. A failed load must display a packaged local error document with Retry and Quit instead of a blank window.
+- [ ] Set the exact allowed loopback Origin from `server.url`, load only `server.entryUrl`, wait for `ready-to-show`, clear the bootstrap navigation history, then show the window. A failed load must display the bundled local error document with Retry and Quit instead of a blank window.
 - [ ] Run the focused tests and confirm all lifecycle and order assertions pass.
 - [ ] Commit only the three task files with `feat: add desktop lifecycle controller`.
 
@@ -140,7 +147,7 @@ webPreferences: {
 
 - [ ] Add tests that allow only the exact active loopback Origin in the application window. `will-navigate` and `setWindowOpenHandler` must deny every other destination. The repository and Releases URLs may be passed to `shell.openExternal()` only after an explicit click; all other external URLs are rejected.
 - [ ] Run `npm run desktop:test -- electron-runtime.test.ts` and confirm failure before the runtime exists.
-- [ ] In `main.ts`, call `app.requestSingleInstanceLock()` before `app.whenReady()`. Quit immediately when it returns false; otherwise register `second-instance` to restore and focus the existing window.
+- [ ] In `main.ts`, synchronously construct the controller through its single-instance `acquire()` path before `app.whenReady()`. Quit immediately when it returns null; otherwise call `start()` after readiness. Do not call `app.requestSingleInstanceLock()` separately in `main.ts`.
 - [ ] Set the application name to `Airgap`, create a single 1180×780 window with minimum size 960×640, hide it until ready, and do not create a tray, login item, daemon, global shortcut, or macOS window-reopen behavior.
 - [ ] Handle `window-all-closed` by invoking the controller shutdown on every platform, including macOS. Do not leave the server alive for the usual macOS dock behavior.
 - [ ] Register `render-process-gone` and failed-load handling so a renderer crash or startup error reaches the stable local error surface and eventual shutdown.
@@ -159,7 +166,7 @@ webPreferences: {
 - [ ] Verify a canceled dialog returns `null`, never creates a file, and is not reported as a failure. Verify write failures remove Airgap's incomplete temporary file and preserve the current Share selection.
 - [ ] Write an Electron integration test for `renderPng(html)` using a long deterministic fixture with a colored marker near the bottom. Require a valid PNG, width 900, height greater than the initial 780 viewport, and the bottom marker to be present when the image is decoded by Electron `nativeImage`.
 - [ ] Run `npm run desktop:test -- electron-export-adapter.test.ts capture.integration.test.ts` and confirm failure before implementation.
-- [ ] Implement capture with a hidden, sandboxed, same-process BrowserWindow. Load only a `data:text/html` document generated by the trusted renderer, wait for fonts/layout, read `document.documentElement.scrollWidth/scrollHeight`, cap dimensions at 900×30000 with a clear image-only error, resize the hidden content area, then call:
+- [ ] Implement capture with a hidden, sandboxed, same-process BrowserWindow. Load only a bounded `data:text/html` document generated by the trusted renderer, wait for fonts/layout, read `document.documentElement.scrollWidth/scrollHeight`, and cap dimensions at 900×8000 with a clear image-only error. This limit is backed by a forced-2x 900×7920 bottom-marker integration test; 30000px requires future tiled capture/composition rather than one Chromium surface. Resize the hidden content area, then call:
 
 ```ts
 const image = await captureWindow.webContents.capturePage(

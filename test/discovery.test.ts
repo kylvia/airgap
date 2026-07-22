@@ -1,7 +1,16 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { claudeProjectsDir, codexSessionsDir, discoverSessions, mungeCwd } from "../src/discovery.js";
+import type { Dirent } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
+import {
+  claudeProjectsDir,
+  codexSessionsDir,
+  discoverSessions,
+  discoverSessionsDetailed,
+  mungeCwd,
+  readSessionCwdForDiscovery,
+} from "../src/discovery.js";
 
 const HOME = fileURLToPath(new URL("./fixtures/home", import.meta.url));
 
@@ -80,5 +89,127 @@ describe("discoverSessions", () => {
 
   it("tolerates a home without any session stores", async () => {
     expect(await discoverSessions({ home: join(HOME, "definitely-missing") })).toEqual([]);
+  });
+
+  it("reports typed provider and path issues without changing the legacy result", async () => {
+    const claudePath = claudeProjectsDir(HOME);
+    const readDirectory = async (dir: string): Promise<Dirent[]> => {
+      if (dir === claudePath) {
+        throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+      }
+      return readdir(dir, { withFileTypes: true });
+    };
+
+    const detailed = await discoverSessionsDetailed({ home: HOME }, { readDirectory });
+    expect(detailed.sessions).toHaveLength(1);
+    expect(detailed.issues).toEqual([
+      { source: "claude", provider: "Claude Code", path: claudePath, code: "EACCES" },
+    ]);
+    await expect(discoverSessions({ home: HOME })).resolves.toHaveLength(4);
+  });
+
+  it("treats missing stores as empty rather than diagnostic failures", async () => {
+    const detailed = await discoverSessionsDetailed({ home: join(HOME, "definitely-missing") });
+    expect(detailed).toEqual({ sessions: [], issues: [] });
+  });
+
+  it.each(["ENOENT", "ENOTDIR"])("treats %s directory failures as an empty store", async (code) => {
+    const detailed = await discoverSessionsDetailed({ home: HOME, sources: ["claude"] }, {
+      readDirectory: async (): Promise<Dirent[]> => {
+        throw Object.assign(new Error("store unavailable"), { code });
+      },
+    });
+
+    expect(detailed).toEqual({ sessions: [], issues: [] });
+  });
+
+  it.each(["EIO", "EMFILE"])("propagates unexpected %s directory failures", async (code) => {
+    const failure = Object.assign(new Error("unexpected filesystem failure"), { code });
+
+    await expect(discoverSessionsDetailed({ home: HOME, sources: ["claude"] }, {
+      readDirectory: async (): Promise<Dirent[]> => {
+        throw failure;
+      },
+    })).rejects.toBe(failure);
+  });
+
+  it.each([
+    { source: "claude" as const, code: "EIO" },
+    { source: "codex" as const, code: "EMFILE" },
+  ])("propagates unexpected $code stat failures for $source sessions", async ({ source, code }) => {
+    const baseline = await discoverSessions({ home: HOME, sources: [source] });
+    const blockedFile = baseline[0]!.file;
+    const failure = Object.assign(new Error("unexpected stat failure"), { code });
+
+    await expect(discoverSessionsDetailed({ home: HOME, sources: [source] }, {
+      statPath: async (target) => {
+        if (target === blockedFile) throw failure;
+        return stat(target);
+      },
+    })).rejects.toBe(failure);
+  });
+
+  it("records stat permission failures and continues discovering the other provider", async () => {
+    const baseline = await discoverSessions({ home: HOME, sources: ["claude"] });
+    const blockedFile = baseline[0]!.file;
+    const detailed = await discoverSessionsDetailed({ home: HOME }, {
+      statPath: async (target) => {
+        if (target === blockedFile) throw Object.assign(new Error("permission denied"), { code: "EPERM" });
+        return stat(target);
+      },
+    });
+
+    expect(detailed.sessions.some((session) => session.file === blockedFile)).toBe(false);
+    expect(detailed.sessions.some((session) => session.source === "codex")).toBe(true);
+    expect(detailed.issues).toContainEqual({
+      source: "claude",
+      provider: "Claude Code",
+      path: join(claudeProjectsDir(HOME), blockedFile.slice(claudeProjectsDir(HOME).length + 1).split("/")[0]!),
+      code: "EPERM",
+    });
+    expect(detailed.issues[0]!.path).not.toContain(basename(blockedFile));
+    expect(detailed.issues[0]!.path).not.toContain(basename(blockedFile, ".jsonl"));
+  });
+
+  it("records JSONL read permission failures and continues discovering the other provider", async () => {
+    const baseline = await discoverSessions({ home: HOME, sources: ["claude"] });
+    const blockedFile = baseline[0]!.file;
+    const detailed = await discoverSessionsDetailed({ home: HOME }, {
+      readSessionCwd: async (target, maxLines) => {
+        if (target === blockedFile) throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+        return readSessionCwdForDiscovery(target, maxLines);
+      },
+    });
+
+    expect(detailed.sessions.some((session) => session.file === blockedFile)).toBe(false);
+    expect(detailed.sessions.some((session) => session.source === "codex")).toBe(true);
+    expect(detailed.issues).toContainEqual({
+      source: "claude",
+      provider: "Claude Code",
+      path: join(claudeProjectsDir(HOME), blockedFile.slice(claudeProjectsDir(HOME).length + 1).split("/")[0]!),
+      code: "EACCES",
+    });
+    expect(detailed.issues[0]!.path).not.toContain(basename(blockedFile));
+  });
+
+  it("never exposes Codex transcript filenames or session UUIDs in access diagnostics", async () => {
+    const baseline = await discoverSessions({ home: HOME, sources: ["codex"] });
+    const blockedFile = baseline[0]!.file;
+    const detailed = await discoverSessionsDetailed({ home: HOME, sources: ["codex"] }, {
+      statPath: async (target) => {
+        if (target === blockedFile) throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+        return stat(target);
+      },
+    });
+
+    expect(detailed.sessions).toEqual([]);
+    expect(detailed.issues).toEqual([{
+      source: "codex",
+      provider: "Codex",
+      path: codexSessionsDir(HOME),
+      code: "EACCES",
+    }]);
+    expect(detailed.issues[0]!.path).not.toContain(basename(blockedFile));
+    expect(detailed.issues[0]!.path).not.toContain(baseline[0]!.id);
   });
 });

@@ -1,31 +1,47 @@
-import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import os from "node:os";
 import path from "node:path";
-import type { RuleMatch, SessionInfo, ToolDisplay, Turn } from "../types.js";
+import type { SessionInfo, ToolDisplay, Turn } from "../types.js";
 import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "../types.js";
 import { loadConfig, sessionListLimit, shareToolDisplay, updateConfig, type ConfigPatch } from "../config.js";
-import { discoverSessions } from "../discovery.js";
+import {
+  discoverSessions,
+  discoverSessionsDetailed,
+  type DiscoveryIssue,
+} from "../discovery.js";
 import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
-import { renderHtml, renderTurnBlock } from "../render/html.js";
-import { renderMarkdown } from "../render/markdown.js";
-import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
-import { oneLine, peekListTitle, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../session.js";
-import { renderPage } from "./page.js";
+import { renderTurnBlock } from "../render/html.js";
+import { oneLine, peekListTitle, pickSession, readRecords, scanOneTurn, sessionTitle, turnTag } from "../session.js";
+import { renderPage, type ShareSurface } from "./page.js";
 import {
   LANGUAGE_PREFERENCES,
   createI18n,
+  languagePreferenceFromSelection,
   resolveLocale,
   type I18n,
   type LanguagePreference,
   type Locale,
 } from "../i18n/index.js";
-import { detectSystemLocale, type SystemLocaleResult } from "../i18n/system.js";
+import { detectSystemLocale, resolveLanguage, type SystemLocaleResult } from "../i18n/system.js";
+import {
+  isAllowedOrigin,
+  isValidShareAccessToken,
+  readCookie,
+  shareCookieName,
+  tokensEqual,
+} from "./share-access.js";
+import {
+  createCliExportAdapter,
+  createShareExportCoordinator,
+  exportHttpStatus,
+  type ShareExportAdapter,
+} from "./share-export.js";
+
+export { exportBlockReason } from "./share-export.js";
 
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟无请求自退，别留僵尸
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const SHUTDOWN_DRAIN_TIMEOUT_MS = 1_000;
 
 // 复制到系统剪贴板走 osascript/pbcopy，只有 macOS 支持；页面据此把「下载 PNG」设为非 mac 的主按钮。
 const isMac = process.platform === "darwin";
@@ -39,6 +55,23 @@ interface SessionSummary {
   mtimeMs: number;
   /** latest ai-title (claude only); null → 前端回退 "<project> · 会话片段" */
   title: string | null;
+}
+
+const UUID_IN_PROJECT = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+export function desktopProjectLabel(
+  project: string,
+  source: SessionInfo["source"],
+  sessionId: string,
+  locale: Locale,
+  hasReliableCwd = true,
+): string {
+  const looksOpaque = project.length === 0 || project.includes(sessionId) || UUID_IN_PROJECT.test(project)
+    || (source === "claude" && !hasReliableCwd);
+  if (!looksOpaque) return project;
+  return createI18n(locale).t(source === "claude"
+    ? "share.desktop.claudeConversation"
+    : "share.desktop.codexConversation");
 }
 
 interface TurnData {
@@ -74,6 +107,22 @@ interface ExportBody {
   acceptRisk?: boolean;
   /** tool-call display level; invalid/absent values fall back to the default */
   tools?: string;
+}
+
+function parseExportBody(value: unknown): ExportBody | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const body = value as Record<string, unknown>;
+  if (typeof body["sessionId"] !== "string" || body["sessionId"].length === 0) return null;
+  if (
+    !Array.isArray(body["turns"]) ||
+    !body["turns"].every((turn) => typeof turn === "number" && Number.isSafeInteger(turn) && turn >= 0)
+  ) return null;
+  if (!(["clipboard", "save", "download"] as const).includes(body["action"] as ExportAction)) return null;
+  if (!(["png", "html", "md"] as const).includes(body["format"] as ExportFormat)) return null;
+  if (body["redact"] !== undefined && typeof body["redact"] !== "boolean") return null;
+  if (body["acceptRisk"] !== undefined && typeof body["acceptRisk"] !== "boolean") return null;
+  if (body["tools"] !== undefined && typeof body["tools"] !== "string") return null;
+  return body as unknown as ExportBody;
 }
 
 /** 宽松解析工具展示级别：非法/缺省一律回落默认，绝不因 UI 参数报错。 */
@@ -112,8 +161,16 @@ export function shareTurnsForDisplay(turns: Turn[], tools: ToolDisplay): Turn[] 
 // ---------- 会话读取 ----------
 
 /** 下拉只放最近 limit 个（config: share.sessionListLimit，常用 10/20/50）；更早的用 `airgap share --session <前缀>` 直开。 */
-async function listSessions(limit: number, ensureId?: string): Promise<SessionSummary[]> {
-  const sessions = await discoverSessions({});
+async function listSessions(
+  limit: number,
+  ensureId?: string,
+  includeIssues = false,
+  locale: Locale = "zh-CN",
+): Promise<{ sessions: SessionSummary[]; issues: DiscoveryIssue[] }> {
+  const discovery = includeIssues
+    ? await discoverSessionsDetailed({})
+    : { sessions: await discoverSessions({}), issues: [] };
+  const sessions = discovery.sessions;
   const sorted = [...sessions].sort((a, b) => b.mtimeMs - a.mtimeMs);
   const top = sorted.slice(0, limit);
   // --session 指定的会话若比 limit 还老，补进列表尾——否则前端下拉里没有它，预选会静默落空。
@@ -122,15 +179,19 @@ async function listSessions(limit: number, ensureId?: string): Promise<SessionSu
     if (hit) top.push(hit);
   }
   // 标题并行流扫：原生标题优先；无标题时取首条有效用户消息，仍保持常量内存。
-  return Promise.all(
-    top.map(async (s) => ({
-      id: s.id,
-      project: s.cwd ? path.basename(s.cwd) : s.project,
-      source: s.source,
-      mtimeMs: s.mtimeMs,
-      title: await peekListTitle(s.file, s.source),
-    })),
+  const summaries = await Promise.all(
+    top.map(async (s) => {
+      const project = s.cwd ? path.basename(s.cwd) : s.project;
+      return {
+        id: s.id,
+        project: includeIssues ? desktopProjectLabel(project, s.source, s.id, locale, s.cwd !== null) : project,
+        source: s.source,
+        mtimeMs: s.mtimeMs,
+        title: await peekListTitle(s.file, s.source),
+      };
+    }),
   );
+  return { sessions: summaries, issues: discovery.issues };
 }
 
 async function findSession(id: string): Promise<SessionInfo | null> {
@@ -175,137 +236,6 @@ async function selectedTurns(
   return { info, turns, title, date };
 }
 
-// ---------- 发送/导出 ----------
-
-function stamp(): string {
-  const d = new Date();
-  const p2 = (n: number): string => String(n).padStart(2, "0");
-  return `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
-}
-
-function run(cmd: string, args: string[], stdin?: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(cmd, args, (err) => (err ? reject(err) : resolve()));
-    if (stdin !== undefined) {
-      child.stdin?.end(stdin);
-    }
-  });
-}
-
-async function pngToClipboard(pngPath: string): Promise<void> {
-  // vanilla AppleScript 路径：直接把文件字节当 PNG 灌进 pasteboard，不经 NSImage，大图稳。
-  // « » 用 \u 转义避免源码编码坑。
-  const script = `set the clipboard to (read (POSIX file "${pngPath}") as «class PNGf»)`;
-  await run("osascript", ["-e", script]);
-}
-
-interface ExportResult {
-  ok: boolean;
-  message: string;
-  code?: string;
-  /** 服务端扫描拦下（含密钥且未 acceptRisk）：HTTP 层回 409，前端可确认后带 acceptRisk 重试 */
-  blocked?: boolean;
-  /** download 时的 PNG 字节 */
-  bytes?: Buffer;
-  filename?: string;
-}
-
-/**
- * 服务端导出前的二次拦截：前端 confirm 可被绕过（或有人直接打 /api/export），所以在真正
- * 渲染导出前再扫一遍选中轮次的可见内容（含 tool input/result）。命中且调用方未显式
- * acceptRisk 时返回一句拒绝理由；否则返回 null 放行。scan 可注入，默认用真实 scanString。
- */
-export function exportBlockReason(
-  turns: Turn[],
-  acceptRisk: boolean | undefined,
-  scan: (s: string) => RuleMatch[] = scanString,
-  locale: Locale = "zh-CN",
-): string | null {
-  if (acceptRisk) return null;
-  const findings = scanTurns(turns, scan);
-  if (findings.length === 0) return null;
-  const brief = findings
-    .slice(0, 5)
-    .map((f) => `${f.ruleId} ${f.preview}`)
-    .join("、");
-  const i18n = createI18n(locale);
-  return i18n.t("share.api.exportRisk", {
-    count: findings.length,
-    brief,
-    more: findings.length > 5 ? i18n.t("share.api.more") : "",
-  });
-}
-
-async function renderPng(turns: Turn[], title: string, date: string, tools: ToolDisplay, locale: Locale): Promise<string> {
-  const chrome = findChrome();
-  if (!chrome) throw new Error(createI18n(locale).t("share.api.chromeMissing"));
-  const html = renderHtml(turns, { title, date }, { tools, locale });
-  // 无空格英文临时名，避开 osascript 路径转义坑
-  const pngPath = path.join(os.tmpdir(), `airgap-share-${randomUUID()}.png`);
-  await renderPngViaChrome(html, pngPath, chrome);
-  return pngPath;
-}
-
-async function handleExport(body: ExportBody, locale: Locale): Promise<ExportResult> {
-  const i18n = createI18n(locale);
-  const tools = parseToolDisplay(body.tools);
-  const sel = await selectedTurns(body.sessionId, body.turns, tools, locale);
-  if (!sel || sel.turns.length === 0) {
-    return { ok: false, code: "NO_TURNS_SELECTED", message: i18n.t("share.api.noSelection") };
-  }
-  const { turns: rawTurns, title, date } = sel;
-
-  // 脱敏后导出（UI 默认）：占位符替换，fail-closed 保证干净，无需再拦截。
-  // 否则真正渲染前二次复扫——前端 confirm 可被绕过，服务端才是最后一道闸。
-  let turns = rawTurns;
-  let redactNote = "";
-  if (body.redact) {
-    const red = redactTurns(rawTurns, scanString);
-    turns = red.turns;
-    if (red.count > 0) redactNote = i18n.t("share.api.redactedNote", { count: red.count });
-  } else {
-    const blockReason = exportBlockReason(rawTurns, body.acceptRisk, scanString, locale);
-    if (blockReason) return { ok: false, blocked: true, code: "EXPORT_SECRET_RISK", message: blockReason };
-  }
-
-  // 存桌面：png / html / md 三格式
-  if (body.action === "save") {
-    // 本地化的 Linux 桌面（如 ~/桌面）会导出到 user-dirs.dirs 里的 XDG_DESKTOP_DIR；未设置时兜底 ~/Desktop。
-    const desktop = process.env["XDG_DESKTOP_DIR"] || path.join(os.homedir(), "Desktop");
-    await mkdir(desktop, { recursive: true });
-    const outPath = path.join(desktop, `airgap-share-${stamp()}.${body.format}`);
-    if (body.format === "png") {
-      const png = await renderPng(turns, title, date, tools, locale);
-      await writeFile(outPath, await readFile(png));
-    } else if (body.format === "html") {
-      await writeFile(outPath, renderHtml(turns, { title, date }, { tools, locale }), "utf8");
-    } else {
-      await writeFile(outPath, renderMarkdown(turns, { title, date }, { tools, locale }), "utf8");
-    }
-    return { ok: true, message: i18n.t("share.api.saved", { path: outPath, note: redactNote }) };
-  }
-
-  // 浏览器下载：回 PNG 字节
-  if (body.action === "download") {
-    const png = await renderPng(turns, title, date, tools, locale);
-    return { ok: true, message: "download", bytes: await readFile(png), filename: `airgap-share-${stamp()}.png` };
-  }
-
-  // 复制到剪贴板：png → 系统剪贴板；md → pbcopy 文本
-  if (body.action === "clipboard") {
-    if (!isMac) return { ok: false, code: "CLIPBOARD_UNSUPPORTED", message: i18n.t("share.api.clipboardMacOnly") };
-    if (body.format === "md") {
-      await run("pbcopy", [], renderMarkdown(turns, { title, date }, { tools, locale }));
-      return { ok: true, message: i18n.t("share.api.markdownCopied", { note: redactNote }) };
-    }
-    const png = await renderPng(turns, title, date, tools, locale);
-    await pngToClipboard(png);
-    return { ok: true, message: i18n.t("share.api.imageCopied", { note: redactNote }) };
-  }
-
-  return { ok: false, code: "UNKNOWN_ACTION", message: i18n.t("share.api.unknownAction") };
-}
-
 // ---------- HTTP ----------
 
 function readBody(req: IncomingMessage, locale: Locale): Promise<string> {
@@ -320,20 +250,43 @@ function readBody(req: IncomingMessage, locale: Locale): Promise<string> {
   });
 }
 
-function sendJson(res: ServerResponse, status: number, obj: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  obj: unknown,
+  headers: Record<string, string> = {},
+): void {
   const buf = Buffer.from(JSON.stringify(obj), "utf8");
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": buf.length });
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "content-length": buf.length,
+    ...headers,
+  });
   res.end(buf);
+}
+
+function sendAccessError(res: ServerResponse, status: 400 | 401 | 403, code: string): void {
+  res.shouldKeepAlive = false;
+  sendJson(res, status, { ok: false, code }, { "cache-control": "no-store", connection: "close" });
 }
 
 export interface ShareServer {
   url: string;
-  close(): void;
+  entryUrl: string;
+  closed: Promise<void>;
+  isClosed(): boolean;
+  close(): Promise<void>;
+  whenExportsIdle(): Promise<void>;
 }
 
 export interface ShareServerOptions {
   port?: number;
   defaultSession?: string;
+  idleTimeoutMs?: number | null;
+  accessToken?: string;
+  surface?: ShareSurface;
+  appVersion?: string;
+  exportAdapter?: ShareExportAdapter;
   locale?: Locale;
   languagePreference?: LanguagePreference;
   configHome?: string;
@@ -341,31 +294,124 @@ export interface ShareServerOptions {
 }
 
 export async function startShareServer(opts: ShareServerOptions): Promise<ShareServer> {
-  let locale = opts.locale ?? "zh-CN";
-  let i18n = createI18n(locale);
-  let languagePreference = opts.languagePreference ?? locale;
+  if (
+    opts.idleTimeoutMs !== undefined &&
+    opts.idleTimeoutMs !== null &&
+    (!Number.isFinite(opts.idleTimeoutMs) ||
+      opts.idleTimeoutMs <= 0 ||
+      opts.idleTimeoutMs > MAX_TIMER_DELAY_MS)
+  ) {
+    throw new TypeError(`idleTimeoutMs must be between 1 and ${MAX_TIMER_DELAY_MS}, null, or undefined`);
+  }
+  if (opts.accessToken !== undefined && !isValidShareAccessToken(opts.accessToken)) {
+    throw new TypeError("accessToken must be a canonical 32-byte base64url capability");
+  }
+
+  const surface = opts.surface ?? "browser";
   const systemLocaleDetector = opts.systemLocaleDetector ?? detectSystemLocale;
   // 启动时读 config；页面设置面板经 POST /api/config 持久化并即时更新这里
   const bootCfg = await loadConfig(opts.configHome);
+  let locale: Locale;
+  let languagePreference: LanguagePreference;
+  if (surface !== "desktop" || opts.locale !== undefined || opts.languagePreference !== undefined) {
+    locale = opts.locale ?? "zh-CN";
+    languagePreference = opts.languagePreference ?? locale;
+  } else {
+    const selection = await resolveLanguage(
+      { config: bootCfg.language },
+      systemLocaleDetector,
+    );
+    locale = selection.locale;
+    languagePreference = languagePreferenceFromSelection(selection);
+  }
+  let i18n = createI18n(locale);
   let listLimit = sessionListLimit(bootCfg);
   let toolDisplay = shareToolDisplay(bootCfg);
-  let idleTimer: NodeJS.Timeout;
+  const exportCoordinator = createShareExportCoordinator({
+    adapter: opts.exportAdapter ?? createCliExportAdapter(),
+    async resolveSelection(request) {
+      const selected = await selectedTurns(
+        request.sessionId,
+        [...request.turns],
+        request.tools,
+        request.locale,
+      );
+      return selected === null
+        ? null
+        : { turns: selected.turns, title: selected.title, date: selected.date };
+    },
+    onError(error) {
+      console.error(error instanceof Error ? error.message : String(error));
+    },
+  });
+  let activeExportRequests = 0;
+  let exportRequestIdleWaiters: Array<() => void> = [];
+  const finishExportRequest = (): void => {
+    activeExportRequests -= 1;
+    if (activeExportRequests !== 0) return;
+    const waiters = exportRequestIdleWaiters;
+    exportRequestIdleWaiters = [];
+    for (const resolve of waiters) resolve();
+  };
+  const whenExportsIdle = async (): Promise<void> => {
+    if (activeExportRequests > 0) {
+      await new Promise<void>((resolve) => exportRequestIdleWaiters.push(resolve));
+    }
+    await exportCoordinator.whenIdle();
+  };
+  const idleTimeoutMs = opts.idleTimeoutMs === undefined ? IDLE_TIMEOUT_MS : opts.idleTimeoutMs;
+  let idleTimer: NodeJS.Timeout | undefined;
+  let closeStarted = false;
+  let closedState = false;
+  let resolveClosed!: () => void;
+  let rejectClosed!: (reason: unknown) => void;
+  const closed = new Promise<void>((resolve, reject) => {
+    resolveClosed = resolve;
+    rejectClosed = reject;
+  });
+
+  let server: Server;
+  const close = (): Promise<void> => {
+    if (closeStarted) return closed;
+    closeStarted = true;
+    closedState = true;
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+
+    if (!server.listening) {
+      resolveClosed();
+      return closed;
+    }
+
+    const drainTimer = setTimeout(() => {
+      server.closeAllConnections();
+    }, SHUTDOWN_DRAIN_TIMEOUT_MS);
+    server.close((error) => {
+      clearTimeout(drainTimer);
+      if (error) {
+        rejectClosed(error);
+        return;
+      }
+      resolveClosed();
+    });
+    return closed;
+  };
+
   const touch = (): void => {
-    clearTimeout(idleTimer);
+    if (idleTimeoutMs === null || closeStarted) return;
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       // eslint-disable-next-line no-console
       console.log(i18n.t("share.server.idle"));
-      server.close();
-      process.exit(0);
-    }, IDLE_TIMEOUT_MS);
+      void close();
+    }, idleTimeoutMs);
   };
 
-  const server: Server = createServer((req, res) => {
-    touch();
+  server = createServer((req, res) => {
     const requestLocale = locale;
     const requestI18n = i18n;
     const requestLanguagePreference = languagePreference;
     void handle(req, res, requestLocale, requestI18n, requestLanguagePreference).catch((err: unknown) => {
+      if (req.aborted || res.destroyed) return;
       console.error(err instanceof Error ? err.message : String(err));
       sendJson(res, 500, { ok: false, code: "INTERNAL_ERROR", message: requestI18n.t("share.api.internal") });
     });
@@ -378,23 +424,122 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
     requestI18n: I18n,
     requestLanguagePreference: LanguagePreference,
   ): Promise<void> {
-    const url = new URL(req.url ?? "/", "http://localhost");
+    const requestTarget = req.url ?? "/";
+    const method = req.method ?? "";
+    let expectedHost: string | undefined;
+    let expectedOrigin: string | undefined;
+    let cookieName: string | undefined;
+    if (opts.accessToken !== undefined) {
+      const address = server.address();
+      if (typeof address !== "object" || address === null) {
+        sendAccessError(res, 401, "UNAUTHORIZED");
+        return;
+      }
+      expectedHost = `127.0.0.1:${address.port}`;
+      expectedOrigin = `http://${expectedHost}`;
+      cookieName = shareCookieName(address.port);
+
+      const isOriginForm =
+        requestTarget.startsWith("/") &&
+        !requestTarget.startsWith("//") &&
+        !requestTarget.includes("\\") &&
+        !requestTarget.includes("#");
+      if (!isOriginForm) {
+        sendAccessError(res, 400, "INVALID_REQUEST_TARGET");
+        return;
+      }
+    }
+
+    let url: URL;
+    try {
+      url = new URL(requestTarget, expectedOrigin ?? "http://localhost");
+    } catch (error) {
+      if (opts.accessToken === undefined) throw error;
+      sendAccessError(res, 400, "INVALID_REQUEST_TARGET");
+      return;
+    }
     const p = url.pathname;
 
-    if (req.method === "GET" && p === "/") {
-      const html = renderPage(opts.defaultSession, toolDisplay, isMac, requestLocale, requestLanguagePreference);
+    if (opts.accessToken !== undefined) {
+      if (expectedHost === undefined || expectedOrigin === undefined || cookieName === undefined) {
+        sendAccessError(res, 401, "UNAUTHORIZED");
+        return;
+      }
+      if (req.headers.host !== expectedHost || url.origin !== expectedOrigin) {
+        sendAccessError(res, 400, "INVALID_HOST");
+        return;
+      }
+
+      if (method === "GET" && p === "/" && url.search !== "") {
+        const entries = [...url.searchParams.entries()];
+        const bootstrapShapeIsValid =
+          /^\?access=[A-Za-z0-9_-]{43}$/.test(url.search) &&
+          entries.length === 1 &&
+          entries[0]?.[0] === "access";
+        const suppliedToken = entries[0]?.[1];
+        if (!bootstrapShapeIsValid || !tokensEqual(suppliedToken, opts.accessToken)) {
+          sendAccessError(res, 401, "UNAUTHORIZED");
+          return;
+        }
+
+        touch();
+        res.writeHead(303, {
+          location: "/",
+          "set-cookie": `${cookieName}=${opts.accessToken}; HttpOnly; SameSite=Strict; Path=/`,
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+          "content-length": "0",
+        });
+        res.end();
+        return;
+      }
+
+      if (url.searchParams.has("access")) {
+        sendAccessError(res, 401, "UNAUTHORIZED");
+        return;
+      }
+
+      const cookieToken = readCookie(req.headers.cookie, cookieName);
+      if (!tokensEqual(cookieToken, opts.accessToken)) {
+        sendAccessError(res, 401, "UNAUTHORIZED");
+        return;
+      }
+
+      if (method === "POST" && !isAllowedOrigin(req.headers.origin, expectedOrigin)) {
+        sendAccessError(res, 403, "INVALID_ORIGIN");
+        return;
+      }
+
+      res.setHeader("cache-control", "no-store");
+    }
+
+    touch();
+
+    if (method === "GET" && p === "/") {
+      const html = renderPage(
+        opts.defaultSession,
+        toolDisplay,
+        isMac,
+        requestLocale,
+        requestLanguagePreference,
+        surface,
+        opts.appVersion,
+      );
       const buf = Buffer.from(html, "utf8");
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-length": buf.length });
       res.end(buf);
       return;
     }
-    if (req.method === "GET" && p === "/api/sessions") {
+    if (method === "GET" && p === "/api/sessions") {
       // ?ensure=<id>：前端焦点刷新时保证「当前正在看的会话」始终在列表里（可能比 limit 老）
       const ensure = url.searchParams.get("ensure") ?? opts.defaultSession;
-      sendJson(res, 200, { sessions: await listSessions(listLimit, ensure ?? undefined), limit: listLimit });
+      const result = await listSessions(listLimit, ensure ?? undefined, surface === "desktop", requestLocale);
+      sendJson(res, 200, surface === "desktop"
+        ? { sessions: result.sessions, limit: listLimit, issues: result.issues }
+        : { sessions: result.sessions, limit: listLimit });
       return;
     }
-    if (req.method === "POST" && p === "/api/config") {
+    if (method === "POST" && p === "/api/config") {
       const parsedBody: unknown = JSON.parse(await readBody(req, requestLocale));
       if (typeof parsedBody !== "object" || parsedBody === null || Array.isArray(parsedBody)) {
         sendJson(res, 400, {
@@ -469,7 +614,7 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
       }
       return;
     }
-    if (req.method === "GET" && p.startsWith("/api/session/")) {
+    if (method === "GET" && p.startsWith("/api/session/")) {
       const id = decodeURIComponent(p.slice("/api/session/".length));
       const detail = await loadDetail(id, parseToolDisplay(url.searchParams.get("tools")), requestLocale);
       if (!detail) {
@@ -479,28 +624,52 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
       sendJson(res, 200, detail);
       return;
     }
-    if (req.method === "POST" && p === "/api/export") {
-      const body = JSON.parse(await readBody(req, requestLocale)) as ExportBody;
-      const result = await handleExport(body, requestLocale);
-      if (result.ok && result.bytes) {
-        res.writeHead(200, {
-          "content-type": "image/png",
-          "content-length": result.bytes.length,
-          "content-disposition": `attachment; filename="${result.filename ?? "airgap-share.png"}"`,
+    if (method === "POST" && p === "/api/export") {
+      activeExportRequests += 1;
+      try {
+        const body = parseExportBody(JSON.parse(await readBody(req, requestLocale)));
+        if (body === null) {
+          sendJson(res, 400, {
+            ok: false,
+            code: "INVALID_EXPORT_REQUEST",
+            message: requestI18n.t("share.api.invalidExportRequest"),
+          });
+          return;
+        }
+        const result = await exportCoordinator.export({
+          sessionId: body.sessionId,
+          turns: body.turns,
+          action: body.action,
+          format: body.format,
+          redact: body.redact,
+          acceptRisk: body.acceptRisk,
+          tools: parseToolDisplay(body.tools),
+          locale: requestLocale,
         });
-        res.end(result.bytes);
+        if (result.outcome === "success" && result.bytes) {
+          res.writeHead(200, {
+            "content-type": "image/png",
+            "content-length": result.bytes.length,
+            "content-disposition": `attachment; filename="${result.filename ?? "airgap-share.png"}"`,
+          });
+          res.end(result.bytes);
+          return;
+        }
+        sendJson(res, exportHttpStatus(result), {
+          ok: result.outcome === "success",
+          cancelled: result.outcome === "cancelled",
+          blocked: result.blocked,
+          code: result.code,
+          message: result.message,
+        });
         return;
+      } finally {
+        finishExportRequest();
       }
-      const status = result.ok ? 200 : result.blocked ? 409 : 400;
-      sendJson(res, status, { ok: result.ok, blocked: result.blocked, code: result.code, message: result.message });
-      return;
     }
-    if (req.method === "POST" && p === "/api/close") {
+    if (method === "POST" && p === "/api/close") {
+      res.once("finish", () => void close());
       sendJson(res, 200, { ok: true });
-      setTimeout(() => {
-        server.close();
-        process.exit(0);
-      }, 100);
       return;
     }
     sendJson(res, 404, { code: "NOT_FOUND", message: requestI18n.t("share.api.notFound") });
@@ -508,12 +677,14 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
 
   const port = await listen(server, opts.port);
   touch();
+  const url = `http://127.0.0.1:${port}/`;
   return {
-    url: `http://127.0.0.1:${port}/`,
-    close: () => {
-      clearTimeout(idleTimer);
-      server.close();
-    },
+    url,
+    entryUrl: opts.accessToken === undefined ? url : `${url}?access=${opts.accessToken}`,
+    closed,
+    isClosed: () => closedState,
+    close,
+    whenExportsIdle,
   };
 }
 

@@ -20,6 +20,9 @@
     "url": "https://github.com/kylvia/airgap/issues"
   },
   "type": "module",
+  "workspaces": [
+    "apps/desktop"
+  ],
   "bin": {
     "airgap": "dist/index.js"
   },
@@ -36,7 +39,11 @@
     "build": "tsup",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "desktop:build": "npm run build --workspace @airgap/desktop",
+    "desktop:start": "npm run start --workspace @airgap/desktop",
+    "desktop:test": "npm run test --workspace @airgap/desktop --",
+    "desktop:make": "npm run make --workspace @airgap/desktop"
   },
   "tsup": {
     "entry": [

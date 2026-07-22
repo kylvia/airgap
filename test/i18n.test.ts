@@ -108,4 +108,62 @@ describe("createI18n", () => {
       zh.t("update.available", { latest: "0.3.0", current: "0.2.0" }),
     ).toContain("Airgap 0.3.0 已发布（当前 0.2.0）");
   });
+
+  it("provides complete nontechnical desktop Share copy in both languages", () => {
+    const en = createI18n("en");
+    const zh = createI18n("zh-CN");
+    const keys = [
+      "share.desktop.title",
+      "share.desktop.conversationLabel",
+      "share.desktop.claudeConversation",
+      "share.desktop.codexConversation",
+      "share.desktop.recheck",
+      "share.desktop.role.me",
+      "share.desktop.role.assistant",
+      "share.desktop.role.tool",
+      "share.desktop.redaction",
+      "share.desktop.copyText",
+      "share.desktop.saveImage",
+      "share.desktop.copyImage",
+      "share.desktop.emptyTitle",
+      "share.desktop.emptyBody",
+      "share.desktop.localOnly",
+      "share.desktop.permissionError",
+      "share.desktop.startupError",
+      "share.desktop.imageFailed",
+      "share.desktop.settings",
+      "share.desktop.advanced",
+      "share.desktop.about",
+      "share.desktop.version",
+      "share.desktop.downloadPage",
+      "share.desktop.conversationPicker",
+      "share.desktop.sessionListLabel",
+      "share.desktop.toolDisplayLabel",
+      "share.desktop.previewLabel",
+      "share.desktop.copyTextSuccess",
+      "share.desktop.copyTextFailed",
+      "share.desktop.copyImageSuccess",
+      "share.desktop.copyImageFailed",
+      "share.desktop.saveImageSuccess",
+      "share.desktop.saveImageFailed",
+      "share.desktop.settingsSaveFailed",
+      "share.desktop.conversationList",
+      "share.desktop.currentUnavailable",
+      "share.desktop.listRefreshed",
+      "share.desktop.conversationRefreshed",
+      "share.desktop.refreshListFailed",
+      "share.desktop.refreshFailed",
+      "share.desktop.loadFailed",
+      "share.page.closeSettings",
+    ] as const;
+
+    for (const key of keys) {
+      expect(en.t(key)).not.toBe(key);
+      expect(zh.t(key)).not.toBe(key);
+    }
+    expect(en.t("share.desktop.redaction")).toContain("possible secrets");
+    expect(zh.t("share.desktop.copyText")).toBe("复制文本");
+    expect(en.t("share.page.closeSettings")).toBe("Close settings");
+    expect(zh.t("share.page.closeSettings")).toBe("关闭设置");
+  });
 });

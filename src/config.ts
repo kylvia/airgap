@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ToolDisplay } from "./types.js";
-import { DEFAULT_TOOL_DISPLAY, TOOL_DISPLAYS } from "./types.js";
+import { TOOL_DISPLAYS } from "./types.js";
 import { LANGUAGE_PREFERENCES, type LanguagePreference } from "./i18n/index.js";
 
 /**
@@ -24,6 +24,7 @@ export interface AirgapConfig {
 }
 
 export const DEFAULT_SESSION_LIST_LIMIT = 20;
+export const DEFAULT_SHARE_TOOL_DISPLAY: ToolDisplay = "none";
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
@@ -68,7 +69,7 @@ export function sessionListLimit(cfg: AirgapConfig): number {
 }
 
 export function shareToolDisplay(cfg: AirgapConfig): ToolDisplay {
-  return cfg.share?.toolDisplay ?? DEFAULT_TOOL_DISPLAY;
+  return cfg.share?.toolDisplay ?? DEFAULT_SHARE_TOOL_DISPLAY;
 }
 
 export interface ShareConfigPatch {

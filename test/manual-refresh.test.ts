@@ -22,14 +22,14 @@ describe("share picker manual refresh", () => {
     const source = await readFile(path.join(root, "src/server/page.ts"), "utf8");
 
     expect(source).toContain("let manualRefreshInFlight = false");
-    expect(source).toContain("if (manualRefreshInFlight) return;");
+    expect(source).toContain("if (manualRefreshInFlight || interactionBusy()) return;");
     expect(source).toContain("await refreshSessions()");
-    expect(source).toContain(
-      'await loadSession(detail.id, true, msg("share.page.sessionRefreshed"))',
-    );
-    expect(source).toContain("button.disabled = false");
+    expect(source).toContain('await loadSession(detail.id, true, msg(SURFACE === "desktop"');
+    expect(source).toContain('"share.desktop.conversationRefreshed" : "share.page.sessionRefreshed"');
+    expect(source).toContain('endInteraction("refresh")');
+    expect(source).not.toContain("button.disabled = false");
     expect(source).toContain('button.removeAttribute("aria-busy")');
-    expect(source).toContain('setStatus(msg("share.page.refreshFailed"), true)');
+    expect(source).toContain('"share.desktop.refreshFailed" : "share.page.refreshFailed"');
     expect(source).not.toMatch(/setInterval|WebSocket/);
   });
 });
