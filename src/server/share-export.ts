@@ -34,6 +34,21 @@ export interface ExportSelection {
 export interface SaveFileRequest {
   suggestedName: string;
   data: Buffer | string;
+  dialogTitle: string;
+  buttonLabel: string;
+}
+
+export type ShareExportAdapterErrorCode = "CAPTURE_FAILED" | "IMAGE_TOO_LARGE";
+
+/** Safe adapter error whose message is allowed to cross into diagnostics. */
+export class ShareExportAdapterError extends Error {
+  constructor(
+    readonly code: ShareExportAdapterErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ShareExportAdapterError";
+  }
 }
 
 export interface ShareExportAdapter {
@@ -178,6 +193,7 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
   let idleWaiters: Array<() => void> = [];
 
   const report = (error: unknown): void => options.onError?.(error);
+  const reportSafe = (message: string): void => report(new Error(message));
   const finish = (): void => {
     active -= 1;
     if (active !== 0) return;
@@ -187,7 +203,8 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
   };
 
   const renderFailure = (error: unknown, locale: Locale): ExportResult => {
-    report(error);
+    void error;
+    reportSafe("Share export rendering failed");
     return errorResult("EXPORT_RENDER_FAILED", createI18n(locale).t("share.api.internal"));
   };
 
@@ -233,9 +250,16 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
       try {
         return await options.adapter.renderPng(html);
       } catch (error) {
-        report(error instanceof CliChromeMissingError
-          ? new Error(i18n.t("share.api.chromeMissing"))
-          : error);
+        if (error instanceof CliChromeMissingError) {
+          reportSafe(i18n.t("share.api.chromeMissing"));
+        } else if (error instanceof ShareExportAdapterError) {
+          reportSafe(`Share export adapter failed (${error.code})`);
+          if (error.code === "IMAGE_TOO_LARGE") {
+            return errorResult("EXPORT_IMAGE_TOO_LARGE", i18n.t("share.api.imageTooLarge"));
+          }
+        } else {
+          reportSafe("Share export adapter failed (CAPTURE_FAILED)");
+        }
         return errorResult("EXPORT_CAPTURE_FAILED", i18n.t("share.api.internal"));
       }
     };
@@ -264,7 +288,8 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
         try {
           await options.adapter.copyText(text);
         } catch (error) {
-          report(error);
+          void error;
+          reportSafe("Share text clipboard export failed");
           return errorResult("EXPORT_CLIPBOARD_FAILED", i18n.t("share.api.internal"));
         }
         return { outcome: "success", code: "TEXT_COPIED", message: i18n.t("share.api.markdownCopied", { note: redactNote }) };
@@ -275,7 +300,8 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
       try {
         await options.adapter.copyImage(png);
       } catch (error) {
-        report(error);
+        void error;
+        reportSafe("Share image clipboard export failed");
         return errorResult("EXPORT_CLIPBOARD_FAILED", i18n.t("share.api.internal"));
       }
       return { outcome: "success", code: "IMAGE_COPIED", message: i18n.t("share.api.imageCopied", { note: redactNote }) };
@@ -295,7 +321,12 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
         }
       }
       try {
-        const savedPath = await options.adapter.saveFile({ suggestedName: `${basename}.${request.format}`, data });
+        const savedPath = await options.adapter.saveFile({
+          suggestedName: `${basename}.${request.format}`,
+          data,
+          dialogTitle: i18n.t("share.api.saveDialogTitle"),
+          buttonLabel: i18n.t("share.api.saveDialogButton"),
+        });
         if (savedPath === null) return { outcome: "cancelled", code: "EXPORT_CANCELLED", message: "" };
         return {
           outcome: "success",
@@ -303,7 +334,8 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
           message: i18n.t("share.api.saved", { path: savedPath, note: redactNote }),
         };
       } catch (error) {
-        report(error);
+        void error;
+        reportSafe("Share file export failed");
         return errorResult("EXPORT_SAVE_FAILED", i18n.t("share.api.internal"));
       }
     }

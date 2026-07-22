@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ShareExportAdapter } from "../../../src/server/share-export.js";
+import {
+  ShareExportAdapterError,
+  type ShareExportAdapter,
+} from "../../../src/server/share-export.js";
 
 const CAPTURE_WIDTH = 900;
 const INITIAL_CAPTURE_HEIGHT = 780;
@@ -12,14 +15,21 @@ const MAX_HTML_BYTES = 8 * 1024 * 1024;
 const DEFAULT_CAPTURE_TIMEOUT_MS = 20_000;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
-export class DesktopCaptureSizeError extends Error {
+export class DesktopCaptureError extends ShareExportAdapterError {
+  constructor(message = "Desktop image capture failed") {
+    super("CAPTURE_FAILED", message);
+    this.name = "DesktopCaptureError";
+  }
+}
+
+export class DesktopCaptureSizeError extends ShareExportAdapterError {
   constructor(message = "The conversation is too large for one image") {
-    super(message);
+    super("IMAGE_TOO_LARGE", message);
     this.name = "DesktopCaptureSizeError";
   }
 }
 
-export class DesktopCaptureTimeoutError extends Error {
+export class DesktopCaptureTimeoutError extends DesktopCaptureError {
   constructor() {
     super("Desktop image capture timed out");
     this.name = "DesktopCaptureTimeoutError";
@@ -333,6 +343,9 @@ export function createElectronExportAdapter(
 
       try {
         return await withTimeout(capture(), captureTimeoutMs);
+      } catch (error) {
+        if (error instanceof ShareExportAdapterError) throw error;
+        throw new DesktopCaptureError();
       } finally {
         if (window && !window.isDestroyed()) window.destroy();
       }
@@ -358,8 +371,8 @@ export function createElectronExportAdapter(
       const selected = await dependencies.dialog.showSaveDialog(
         dependencies.getParentWindow?.(),
         {
-          title: "保存 Airgap 导出",
-          buttonLabel: "保存",
+          title: request.dialogTitle,
+          buttonLabel: request.buttonLabel,
           defaultPath: request.suggestedName,
           properties: ["createDirectory", "showOverwriteConfirmation"],
         },

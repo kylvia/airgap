@@ -16,12 +16,13 @@ import { renderPage, type ShareSurface } from "./page.js";
 import {
   LANGUAGE_PREFERENCES,
   createI18n,
+  languagePreferenceFromSelection,
   resolveLocale,
   type I18n,
   type LanguagePreference,
   type Locale,
 } from "../i18n/index.js";
-import { detectSystemLocale, type SystemLocaleResult } from "../i18n/system.js";
+import { detectSystemLocale, resolveLanguage, type SystemLocaleResult } from "../i18n/system.js";
 import {
   isAllowedOrigin,
   isValidShareAccessToken,
@@ -63,8 +64,10 @@ export function desktopProjectLabel(
   source: SessionInfo["source"],
   sessionId: string,
   locale: Locale,
+  hasReliableCwd = true,
 ): string {
-  const looksOpaque = project.length === 0 || project.includes(sessionId) || UUID_IN_PROJECT.test(project);
+  const looksOpaque = project.length === 0 || project.includes(sessionId) || UUID_IN_PROJECT.test(project)
+    || (source === "claude" && !hasReliableCwd);
   if (!looksOpaque) return project;
   return createI18n(locale).t(source === "claude"
     ? "share.desktop.claudeConversation"
@@ -181,7 +184,7 @@ async function listSessions(
       const project = s.cwd ? path.basename(s.cwd) : s.project;
       return {
         id: s.id,
-        project: includeIssues ? desktopProjectLabel(project, s.source, s.id, locale) : project,
+        project: includeIssues ? desktopProjectLabel(project, s.source, s.id, locale, s.cwd !== null) : project,
         source: s.source,
         mtimeMs: s.mtimeMs,
         title: await peekTitle(s.file),
@@ -304,13 +307,24 @@ export async function startShareServer(opts: ShareServerOptions): Promise<ShareS
     throw new TypeError("accessToken must be a canonical 32-byte base64url capability");
   }
 
-  let locale = opts.locale ?? "zh-CN";
-  let i18n = createI18n(locale);
-  let languagePreference = opts.languagePreference ?? locale;
   const surface = opts.surface ?? "browser";
   const systemLocaleDetector = opts.systemLocaleDetector ?? detectSystemLocale;
   // 启动时读 config；页面设置面板经 POST /api/config 持久化并即时更新这里
   const bootCfg = await loadConfig(opts.configHome);
+  let locale: Locale;
+  let languagePreference: LanguagePreference;
+  if (surface !== "desktop" || opts.locale !== undefined || opts.languagePreference !== undefined) {
+    locale = opts.locale ?? "zh-CN";
+    languagePreference = opts.languagePreference ?? locale;
+  } else {
+    const selection = await resolveLanguage(
+      { config: bootCfg.language },
+      systemLocaleDetector,
+    );
+    locale = selection.locale;
+    languagePreference = languagePreferenceFromSelection(selection);
+  }
+  let i18n = createI18n(locale);
   let listLimit = sessionListLimit(bootCfg);
   let toolDisplay = shareToolDisplay(bootCfg);
   const exportCoordinator = createShareExportCoordinator({

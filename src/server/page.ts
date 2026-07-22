@@ -156,7 +156,6 @@ export function renderPage(
     <label class="rdct" title="${escapeHtml(t("share.desktop.redactionHint"))}"><input type="checkbox" id="redact" data-testid="redaction-toggle" checked><span class="rdct-copy"><span>${escapeHtml(t("share.desktop.redaction"))}</span><small>${escapeHtml(t("share.desktop.redactionHint"))}</small></span></label>
     <button data-a="clipboard" data-f="md" data-testid="copy-text" disabled>${escapeHtml(t("share.desktop.copyText"))}</button>
     <button data-a="save" data-f="png" data-testid="save-image" disabled>${escapeHtml(t("share.desktop.saveImage"))}</button>
-    <span class="status err" id="image-failure-copy" hidden>${escapeHtml(t("share.desktop.imageFailed"))}</span>
     <span class="status" id="status" role="status" aria-live="polite">${escapeHtml(t("share.desktop.ready"))}</span>
     <button class="primary" data-a="clipboard" data-f="png" data-testid="copy-image" disabled>${escapeHtml(t("share.desktop.copyImage"))}</button>
   </footer>`
@@ -410,8 +409,14 @@ function setEmptyStateVisible(state, visible) {
   setSelectionControlsDisabled(visible || !detail);
 }
 
-function desktopExportMessage(action, format, ok) {
+function desktopExportMessage(action, format, ok, code) {
   if (SURFACE !== "desktop") return null;
+  if (!ok && code === "EXPORT_IMAGE_TOO_LARGE") return msg("share.desktop.imageTooLarge");
+  if (!ok && code === "EXPORT_CAPTURE_FAILED") return msg("share.desktop.imageFailed");
+  if (!ok && code === "EXPORT_CLIPBOARD_FAILED") {
+    return msg(format === "md" ? "share.desktop.copyTextFailed" : "share.desktop.copyImageFailed");
+  }
+  if (!ok && code === "EXPORT_SAVE_FAILED") return msg("share.desktop.saveImageFailed");
   if (action === "clipboard" && format === "md") return msg(ok ? "share.desktop.copyTextSuccess" : "share.desktop.copyTextFailed");
   if (action === "clipboard" && format === "png") return msg(ok ? "share.desktop.copyImageSuccess" : "share.desktop.copyImageFailed");
   if (action === "save" && format === "png") return msg(ok ? "share.desktop.saveImageSuccess" : "share.desktop.saveImageFailed");
@@ -788,7 +793,7 @@ async function performExport(action, format, acceptRisk) {
     }
     // 原生保存框取消是一次无结果的用户选择，不应被说成成功或失败，也不改变当前勾选。
     if (res.code === "EXPORT_CANCELLED") { setStatus(msg("share.page.cancelled")); return; }
-    setStatus(desktopExportMessage(action, format, res.ok) || res.message, !res.ok);
+    setStatus(desktopExportMessage(action, format, res.ok, res.code) || res.message, !res.ok);
   } catch (error) {
     const message = desktopExportMessage(action, format, false);
     if (message) setStatus(message, true);

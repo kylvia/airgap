@@ -75,6 +75,11 @@ function recordAccessIssue(
   return true;
 }
 
+function isMissingPathError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
 async function safeReaddir(
   dir: string,
   source: DiscoveryIssue["source"],
@@ -83,8 +88,9 @@ async function safeReaddir(
   try {
     return await context.readDirectory(dir);
   } catch (error) {
-    recordAccessIssue(context, source, dir, error);
-    return [];
+    if (isMissingPathError(error)) return [];
+    if (recordAccessIssue(context, source, dir, error)) return [];
+    throw error;
   }
 }
 
@@ -147,8 +153,9 @@ async function discoverClaude(home: string, context: DiscoveryContext): Promise<
       try {
         st = await context.statPath(file);
       } catch (error) {
-        recordAccessIssue(context, "claude", file, error);
-        continue;
+        if (isMissingPathError(error)) continue;
+        if (recordAccessIssue(context, "claude", file, error)) continue;
+        throw error;
       }
       const id = e.name.slice(0, -".jsonl".length);
       let cwd: string | null;
@@ -192,8 +199,9 @@ async function discoverCodex(home: string, context: DiscoveryContext): Promise<S
       try {
         st = await context.statPath(p);
       } catch (error) {
-        recordAccessIssue(context, "codex", p, error);
-        continue;
+        if (isMissingPathError(error)) continue;
+        if (recordAccessIssue(context, "codex", p, error)) continue;
+        throw error;
       }
       const id = ROLLOUT_UUID.exec(e.name)?.[1] ?? basename(e.name, ".jsonl");
       let cwd: string | null;

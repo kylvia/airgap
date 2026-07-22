@@ -113,6 +113,42 @@ describe("discoverSessions", () => {
     expect(detailed).toEqual({ sessions: [], issues: [] });
   });
 
+  it.each(["ENOENT", "ENOTDIR"])("treats %s directory failures as an empty store", async (code) => {
+    const detailed = await discoverSessionsDetailed({ home: HOME, sources: ["claude"] }, {
+      readDirectory: async (): Promise<Dirent[]> => {
+        throw Object.assign(new Error("store unavailable"), { code });
+      },
+    });
+
+    expect(detailed).toEqual({ sessions: [], issues: [] });
+  });
+
+  it.each(["EIO", "EMFILE"])("propagates unexpected %s directory failures", async (code) => {
+    const failure = Object.assign(new Error("unexpected filesystem failure"), { code });
+
+    await expect(discoverSessionsDetailed({ home: HOME, sources: ["claude"] }, {
+      readDirectory: async (): Promise<Dirent[]> => {
+        throw failure;
+      },
+    })).rejects.toBe(failure);
+  });
+
+  it.each([
+    { source: "claude" as const, code: "EIO" },
+    { source: "codex" as const, code: "EMFILE" },
+  ])("propagates unexpected $code stat failures for $source sessions", async ({ source, code }) => {
+    const baseline = await discoverSessions({ home: HOME, sources: [source] });
+    const blockedFile = baseline[0]!.file;
+    const failure = Object.assign(new Error("unexpected stat failure"), { code });
+
+    await expect(discoverSessionsDetailed({ home: HOME, sources: [source] }, {
+      statPath: async (target) => {
+        if (target === blockedFile) throw failure;
+        return stat(target);
+      },
+    })).rejects.toBe(failure);
+  });
+
   it("records stat permission failures and continues discovering the other provider", async () => {
     const baseline = await discoverSessions({ home: HOME, sources: ["claude"] });
     const blockedFile = baseline[0]!.file;

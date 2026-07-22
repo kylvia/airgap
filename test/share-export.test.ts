@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RuleMatch, Turn } from "../src/types.js";
 import {
   CliChromeMissingError,
+  ShareExportAdapterError,
   createCliExportAdapter,
   createShareExportCoordinator,
   type ExportRequest,
@@ -74,6 +75,8 @@ describe("Share export coordinator", () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]!.suggestedName).toMatch(/^airgap-share-\d{8}-\d{6}\.png$/);
     expect(saved[0]!.data).toEqual(Buffer.from("png"));
+    expect(saved[0]!.dialogTitle).toBe("Save Airgap export");
+    expect(saved[0]!.buttonLabel).toBe("Save");
     expect(result.message).toContain(`/chosen/${saved[0]!.suggestedName}`);
   });
 
@@ -120,6 +123,38 @@ describe("Share export coordinator", () => {
     const { adapter } = fakeAdapter(overrides);
     const request = code === "EXPORT_SAVE_FAILED" ? { ...baseRequest, action: "save" as const } : baseRequest;
     await expect(coordinator(adapter).export(request)).resolves.toMatchObject({ outcome: "error", code });
+  });
+
+  it("maps an oversized image to actionable localized feedback", async () => {
+    const { adapter } = fakeAdapter({
+      renderPng: vi.fn(async () => {
+        throw new ShareExportAdapterError("IMAGE_TOO_LARGE", "Image export is too large");
+      }),
+    });
+
+    await expect(coordinator(adapter).export(baseRequest)).resolves.toMatchObject({
+      outcome: "error",
+      code: "EXPORT_IMAGE_TOO_LARGE",
+      message: expect.stringMatching(/fewer turns|copy text/i),
+    });
+  });
+
+  it("never forwards arbitrary adapter error text to the reporter", async () => {
+    const secret = "sk-ant-api03-DO-NOT-LOG-THIS-SECRET";
+    const onError = vi.fn();
+    const { adapter } = fakeAdapter({
+      renderPng: vi.fn(async () => { throw new Error(secret); }),
+    });
+    const exportCoordinator = createShareExportCoordinator({
+      adapter,
+      resolveSelection: vi.fn(async () => selection),
+      onError,
+    });
+
+    await exportCoordinator.export(baseRequest);
+
+    expect(onError).toHaveBeenCalledOnce();
+    expect(String(onError.mock.calls[0]![0])).not.toContain(secret);
   });
 
   it("classifies synchronous renderer failures separately", async () => {
@@ -257,7 +292,12 @@ describe("Share export coordinator", () => {
 
   it("rejects path-like suggested names inside the CLI adapter", async () => {
     const adapter = createCliExportAdapter();
-    await expect(adapter.saveFile({ suggestedName: "../../../.zshrc", data: "bad" }))
+    await expect(adapter.saveFile({
+      suggestedName: "../../../.zshrc",
+      data: "bad",
+      dialogTitle: "Save Airgap export",
+      buttonLabel: "Save",
+    }))
       .rejects.toThrow(/filename/i);
   });
 

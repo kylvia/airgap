@@ -289,14 +289,21 @@ describe("renderPage desktop surface", () => {
   });
 
   it("maps desktop export feedback without exposing backend implementation details", () => {
-    expect(page).toContain("function desktopExportMessage(action, format, ok)");
+    expect(page).not.toContain('id="image-failure-copy"');
+    expect(page).toContain("function desktopExportMessage(action, format, ok, code)");
+    expect(page).toContain('code === "EXPORT_IMAGE_TOO_LARGE"');
+    expect(page).toContain('msg("share.desktop.imageTooLarge")');
+    expect(page).toContain('code === "EXPORT_CAPTURE_FAILED"');
+    expect(page).toContain('msg("share.desktop.imageFailed")');
+    expect(page).toContain('code === "EXPORT_CLIPBOARD_FAILED"');
+    expect(page).toContain('code === "EXPORT_SAVE_FAILED"');
     expect(page).toContain('action === "clipboard" && format === "md"');
     expect(page).toContain('msg(ok ? "share.desktop.copyTextSuccess" : "share.desktop.copyTextFailed")');
     expect(page).toContain('msg(ok ? "share.desktop.copyImageSuccess" : "share.desktop.copyImageFailed")');
     expect(page).toContain('msg(ok ? "share.desktop.saveImageSuccess" : "share.desktop.saveImageFailed")');
     const exportHandler = page.slice(page.indexOf("async function doExport"), page.indexOf("for (const btn"));
     expect(exportHandler).toContain("confirm(res.message");
-    expect(exportHandler).toContain("desktopExportMessage(action, format, res.ok) || res.message");
+    expect(exportHandler).toContain("desktopExportMessage(action, format, res.ok, res.code) || res.message");
     expect(exportHandler).toContain("desktopExportMessage(action, format, false)");
   });
 
@@ -469,6 +476,11 @@ describe("desktopProjectLabel", () => {
   it("keeps a normal project basename", () => {
     expect(desktopProjectLabel("airgap", "claude", id, "en")).toBe("airgap");
   });
+
+  it("hides Claude's munged project path when no reliable cwd was discovered", () => {
+    expect(desktopProjectLabel("-Users-alice-client-work", "claude", id, "en", false))
+      .toBe("Claude Code conversation");
+  });
 });
 
 describe("renderPage internationalization", () => {
@@ -517,6 +529,39 @@ describe("renderPage internationalization", () => {
 });
 
 describe("Share server locale wiring", () => {
+  it("uses the saved boot language when a desktop caller omits locale options", async () => {
+    const home = await tempHome('{"language":"en"}');
+    const server = await startShareServer({
+      surface: "desktop",
+      idleTimeoutMs: null,
+      configHome: home,
+      systemLocaleDetector: async () => ({ locale: "zh-CN", source: "test system" }),
+    });
+    try {
+      const page = await fetch(server.url).then((response) => response.text());
+      expect(page).toContain('<html lang="en">');
+      expect(page).toContain('<option value="en" selected>English</option>');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("uses the system boot language as an automatic desktop preference", async () => {
+    const server = await startShareServer({
+      surface: "desktop",
+      idleTimeoutMs: null,
+      configHome: await tempHome(),
+      systemLocaleDetector: async () => ({ locale: "en-US", source: "test system" }),
+    });
+    try {
+      const page = await fetch(server.url).then((response) => response.text());
+      expect(page).toContain('<html lang="en">');
+      expect(page).toContain('<option value="auto" selected>Follow system</option>');
+    } finally {
+      await server.close();
+    }
+  });
+
   it("passes desktop surface and app version into the shared renderer", async () => {
     const server = await startShareServer({ surface: "desktop", appVersion: "0.3.0", idleTimeoutMs: null });
     try {

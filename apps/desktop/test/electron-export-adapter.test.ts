@@ -1,6 +1,7 @@
 import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import {
+  DesktopCaptureError,
   DesktopCaptureSizeError,
   createElectronExportAdapter,
   type CaptureWindowLike,
@@ -27,6 +28,7 @@ class FakeCaptureWindow implements CaptureWindowLike {
   capturedOptions: unknown;
   png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
   hangLoad = false;
+  failLoadWithUrl = false;
 
   readonly webContents = {
     on: (event: string, listener: (...args: any[]) => void) => {
@@ -61,6 +63,7 @@ class FakeCaptureWindow implements CaptureWindowLike {
 
   async loadURL(url: string): Promise<void> {
     this.loadedUrl = url;
+    if (this.failLoadWithUrl) throw new Error(`ERR_FAILED loading ${url}`);
     if (this.hangLoad) await new Promise<void>(() => {});
   }
   setContentSize(width: number, height: number): void { this.contentSize = [width, height]; }
@@ -72,6 +75,7 @@ function setup(options: {
   cancelled?: boolean;
   dimensions?: unknown;
   hangLoad?: boolean;
+  failLoadWithUrl?: boolean;
   invalidClipboardImage?: boolean;
   captureTimeoutMs?: number;
   decodedScale?: number;
@@ -98,6 +102,7 @@ function setup(options: {
       const window = new FakeCaptureWindow();
       if (options.dimensions !== undefined) window.dimensions = options.dimensions;
       window.hangLoad = options.hangLoad ?? false;
+      window.failLoadWithUrl = options.failLoadWithUrl ?? false;
       captureWindows.push(window);
       return window;
     },
@@ -164,16 +169,30 @@ describe("Electron native export adapter", () => {
 
   test("returns null on save cancellation without touching the filesystem", async () => {
     const { adapter, fileLog } = setup({ cancelled: true });
-    await expect(adapter.saveFile({ suggestedName: "export.md", data: "hello" })).resolves.toBeNull();
+    await expect(adapter.saveFile({
+      suggestedName: "export.md",
+      data: "hello",
+      dialogTitle: "Save Airgap export",
+      buttonLabel: "Save",
+    })).resolves.toBeNull();
     expect(fileLog).toEqual([]);
   });
 
   test("writes a private temporary file beside the destination then atomically renames it", async () => {
     const { adapter, dependencies, fileLog } = setup();
-    const saved = await adapter.saveFile({ suggestedName: "export.md", data: "hello" });
+    const saved = await adapter.saveFile({
+      suggestedName: "export.md",
+      data: "hello",
+      dialogTitle: "Save Airgap export",
+      buttonLabel: "Save",
+    });
     const temporary = "/Users/test/Desktop/.export.md.airgap-fixed-id.tmp";
 
     expect(saved).toBe("/Users/test/Desktop/export.md");
+    expect(dependencies.dialog.showSaveDialog).toHaveBeenCalledWith(
+      dependencies.getParentWindow?.(),
+      expect.objectContaining({ title: "Save Airgap export", buttonLabel: "Save" }),
+    );
     expect(dependencies.files!.writeFile).toHaveBeenCalledWith(
       temporary,
       Buffer.from("hello"),
@@ -193,7 +212,12 @@ describe("Electron native export adapter", () => {
       throw new Error("disk full");
     });
 
-    await expect(adapter.saveFile({ suggestedName: "export.md", data: "hello" })).rejects.toThrow("disk full");
+    await expect(adapter.saveFile({
+      suggestedName: "export.md",
+      data: "hello",
+      dialogTitle: "Save Airgap export",
+      buttonLabel: "Save",
+    })).rejects.toThrow("disk full");
     expect(fileLog).toEqual([
       "write:/Users/test/Desktop/.export.md.airgap-fixed-id.tmp",
       "rm:/Users/test/Desktop/.export.md.airgap-fixed-id.tmp",
@@ -208,7 +232,12 @@ describe("Electron native export adapter", () => {
       throw new Error("rename failed");
     });
 
-    await expect(adapter.saveFile({ suggestedName: "export.md", data: Buffer.from("hello") }))
+    await expect(adapter.saveFile({
+      suggestedName: "export.md",
+      data: Buffer.from("hello"),
+      dialogTitle: "Save Airgap export",
+      buttonLabel: "Save",
+    }))
       .rejects.toThrow("rename failed");
     expect(fileLog).toEqual([
       "write:/Users/test/Desktop/.export.md.airgap-fixed-id.tmp",
@@ -283,6 +312,18 @@ describe("Electron native export adapter", () => {
 
     await expect(rendering).rejects.toBeInstanceOf(DesktopCaptureSizeError);
     expect(captureWindows[0]!.capturedRect).toBeUndefined();
+    expect(captureWindows[0]!.destroyed).toBe(true);
+  });
+
+  test("sanitizes a failed data-URL load before the error leaves the adapter", async () => {
+    const secret = "sk-ant-api03-DO-NOT-LOG-THIS-SECRET";
+    const { adapter, captureWindows } = setup({ failLoadWithUrl: true });
+    const html = `<html><head></head><body>${secret}</body></html>`;
+
+    const rendering = adapter.renderPng(html);
+    await expect(rendering).rejects.toBeInstanceOf(DesktopCaptureError);
+    await expect(rendering).rejects.not.toThrow(secret);
+    await expect(rendering).rejects.not.toThrow(Buffer.from(secret).toString("base64"));
     expect(captureWindows[0]!.destroyed).toBe(true);
   });
 
