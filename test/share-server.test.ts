@@ -418,7 +418,7 @@ describe("renderPage desktop surface", () => {
     expect(refresh).toContain('beginInteraction("refresh")');
     expect(refresh).toContain('endInteraction("refresh")');
     for (const handler of [
-      page.slice(page.indexOf('$("limit").onchange'), page.indexOf("const focusEvent")),
+      page.slice(page.indexOf('$("limit").onchange'), page.indexOf("const resumeEvent")),
       page.slice(page.indexOf('$("tools").onchange'), page.indexOf('$("language").onchange')),
       page.slice(page.indexOf('$("language").onchange'), page.indexOf("loadSessions();")),
     ]) {
@@ -428,9 +428,10 @@ describe("renderPage desktop surface", () => {
     }
   });
 
-  it("uses Electron's native focus signal instead of iframe focus transitions on desktop", () => {
-    expect(page).toContain('const focusEvent = SURFACE === "desktop" ? "airgap-native-focus" : "focus"');
-    expect(page).toContain("window.addEventListener(focusEvent, () => {");
+  it("never treats iframe focus transitions as an app or tab resume", () => {
+    expect(page).toContain('const resumeEvent = SURFACE === "desktop" ? "airgap-native-focus" : "visibilitychange"');
+    expect(page).toContain("window.addEventListener(resumeEvent, () => {");
+    expect(page).toContain('if (resumeEvent === "visibilitychange" && document.visibilityState !== "visible") return');
     expect(page).not.toContain('window.addEventListener("focus", () => {');
   });
 

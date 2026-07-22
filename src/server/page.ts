@@ -622,8 +622,9 @@ $("limit").onchange = async () => {
     endInteraction("settings");
   }
 };
-const focusEvent = SURFACE === "desktop" ? "airgap-native-focus" : "focus";
-window.addEventListener(focusEvent, () => {
+const resumeEvent = SURFACE === "desktop" ? "airgap-native-focus" : "visibilitychange";
+window.addEventListener(resumeEvent, () => {
+  if (resumeEvent === "visibilitychange" && document.visibilityState !== "visible") return;
   if (manualRefreshInFlight || interactionBusy() || Date.now() - lastListRefresh < 5000) return;
   lastListRefresh = Date.now();
   refreshSessions().catch(() => {});
