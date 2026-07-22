@@ -330,6 +330,20 @@ describe("renderPage desktop surface", () => {
     expect(exportHandler).toContain("desktopExportMessage(action, format, false)");
   });
 
+  it("guides oversized image exports to Copy text after restoring the controls", () => {
+    const zh = renderPage(undefined, "none", true, "zh-CN", "zh-CN", "desktop", "0.3.0");
+    expect(zh).toContain("点击“复制文本”导出全部已选内容");
+    expect(page).toContain("let focusCopyTextAfterExport = false");
+
+    const exportHandler = page.slice(page.indexOf("async function doExport"), page.indexOf("for (const btn"));
+    expect(exportHandler).toContain('res.code === "EXPORT_IMAGE_TOO_LARGE"');
+    expect(exportHandler).toContain("focusCopyTextAfterExport = true");
+    expect(exportHandler).toContain('document.querySelector(\'footer button[data-a="clipboard"][data-f="md"]\')?.focus()');
+    expect(exportHandler.indexOf('endInteraction("export")')).toBeLessThan(
+      exportHandler.indexOf("focusCopyTextAfterExport = false"),
+    );
+  });
+
   it("treats a native save cancellation as neither success nor failure", () => {
     const exportHandler = page.slice(page.indexOf("async function performExport"), page.indexOf("for (const btn"));
     expect(exportHandler).toContain('if (res.code === "EXPORT_CANCELLED") { setStatus(msg("share.page.cancelled")); return; }');

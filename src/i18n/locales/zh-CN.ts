@@ -106,7 +106,7 @@ export const zhCN = {
   "share.desktop.permissionHelp": "获取帮助",
   "share.desktop.startupError": "Airgap 无法载入对话。请重新检查后再试。",
   "share.desktop.imageFailed": "图片导出失败。当前选择没有改变，你仍可复制文本。",
-  "share.desktop.imageTooLarge": "图片内容过长，请减少选择的轮次，或改为复制文本。",
+  "share.desktop.imageTooLarge": "图片内容过长，无法生成单张图片。请减少选择的轮次，或点击“复制文本”导出全部已选内容。",
   "share.desktop.settings": "设置",
   "share.desktop.advanced": "高级设置",
   "share.desktop.about": "关于",

@@ -371,6 +371,7 @@ const selected = new Set();   // 选中的轮次 index
 let pvReady = false;          // 预览 iframe 是否已加载好
 let discoveryIssueMessage = null;
 let exportInFlight = false;
+let focusCopyTextAfterExport = false;
 const inFlight = { bootstrap: 0, refresh: 0, load: 0, export: 0, settings: 0 };
 
 const $ = (id) => document.getElementById(id);
@@ -794,6 +795,10 @@ async function doExport(action, format, acceptRisk) {
   } finally {
     exportInFlight = false;
     endInteraction("export");
+    if (focusCopyTextAfterExport) {
+      focusCopyTextAfterExport = false;
+      document.querySelector('footer button[data-a="clipboard"][data-f="md"]')?.focus();
+    }
   }
 }
 
@@ -817,6 +822,9 @@ async function performExport(action, format, acceptRisk) {
       setStatus(redact ? msg("share.page.downloadedRedacted") : msg("share.page.downloaded")); return;
     }
     const res = await r.json();
+    if (SURFACE === "desktop" && !res.ok && res.code === "EXPORT_IMAGE_TOO_LARGE") {
+      focusCopyTextAfterExport = true;
+    }
     // 服务端拦截（原样导出且命中，或有人绕过 UI）：确认后带 acceptRisk 重试一次。
     if (r.status === 409 && res.blocked) {
       if (confirm(res.message + "\\n" + msg("share.page.confirmAgain"))) return performExport(action, format, true);

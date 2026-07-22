@@ -104,7 +104,7 @@ export const en = {
   "share.desktop.permissionHelp": "Get help",
   "share.desktop.startupError": "Airgap could not load conversations. Recheck to try again.",
   "share.desktop.imageFailed": "Image export failed. Your selection is unchanged, and you can still copy text.",
-  "share.desktop.imageTooLarge": "The image is too large. Select fewer turns or copy text instead.",
+  "share.desktop.imageTooLarge": "The image is too large for a single image. Select fewer turns, or choose “Copy text” to export all selected content.",
   "share.desktop.settings": "Settings",
   "share.desktop.advanced": "Advanced",
   "share.desktop.about": "About",
