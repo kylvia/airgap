@@ -155,7 +155,7 @@ describe("renderPage (share picker shell)", () => {
     expect(page).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
   });
 
-  it("renders an accessible bilingual Tool display tooltip", () => {
+  it("renders an unclipped accessible bilingual Tool display tooltip", () => {
     const zh = renderPage(undefined, "summary", true, "zh-CN");
     expect(zh).toContain('id="tool-help-trigger"');
     expect(zh).toContain('type="button"');
@@ -167,6 +167,9 @@ describe("renderPage (share picker shell)", () => {
     expect(zh).toContain("富文本预览中展示输入与结果摘要；Markdown 和检索类工具仍使用摘要。");
     expect(zh).toContain(".tool-help-wrap:hover .tool-help-tooltip");
     expect(zh).toContain(".tool-help-wrap:focus-within .tool-help-tooltip");
+    expect(zh).toContain("top: calc(100% + 7px); right: -4px;");
+    expect(zh).toContain("#prefpanel:has(.tool-help-wrap:hover),");
+    expect(zh).toContain("#prefpanel:has(.tool-help-wrap:focus-within) { overflow: visible; }");
 
     const en = renderPage(undefined, "summary", true, "en");
     expect(en).toContain('aria-label="About tool display"');

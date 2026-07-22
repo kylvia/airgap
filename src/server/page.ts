@@ -241,6 +241,8 @@ ${sidCss}
   #prefpanel { width: min(440px, calc(100vw - 32px)); max-height: min(680px, calc(100vh - 32px));
     margin: auto; padding: 0; overflow: auto; color: var(--fg); background: var(--bg);
     border: 1px solid var(--border-strong); border-radius: var(--radius-card); }
+  #prefpanel:has(.tool-help-wrap:hover),
+  #prefpanel:has(.tool-help-wrap:focus-within) { overflow: visible; }
   #prefpanel:not([open]) { display: none; }
   #prefpanel::backdrop { background: rgba(26, 24, 20, 0.28); }
   #prefpanel .settings-sheet { padding: 18px 20px 20px; }
