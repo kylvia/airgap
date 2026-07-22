@@ -622,7 +622,8 @@ $("limit").onchange = async () => {
     endInteraction("settings");
   }
 };
-window.addEventListener("focus", () => {
+const focusEvent = SURFACE === "desktop" ? "airgap-native-focus" : "focus";
+window.addEventListener(focusEvent, () => {
   if (manualRefreshInFlight || interactionBusy() || Date.now() - lastListRefresh < 5000) return;
   lastListRefresh = Date.now();
   refreshSessions().catch(() => {});

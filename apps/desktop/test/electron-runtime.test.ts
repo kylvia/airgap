@@ -25,7 +25,9 @@ class FakeWindow implements BrowserWindowLike {
   destroyed = false;
   readonly windowListeners = new Map<string, (...args: unknown[]) => void>();
   readonly webListeners = new Map<string, (...args: unknown[]) => void>();
+  readonly nativeListeners = new Map<string, (...args: unknown[]) => void>();
   readonly loadedUrls: string[] = [];
+  readonly executedScripts: string[] = [];
   openHandler: ((details: { url: string; disposition: string }) => { action: "deny" }) | undefined;
   permissionHandler: ((webContents: unknown, permission: string, callback: (allowed: boolean) => void) => void) | undefined;
   permissionCheckHandler: ((webContents: unknown, permission: string, requestingOrigin: string) => boolean) | undefined;
@@ -46,6 +48,9 @@ class FakeWindow implements BrowserWindowLike {
         this.historyClearCalls += 1;
       },
     },
+    executeJavaScript: async (script: string) => {
+      this.executedScripts.push(script);
+    },
     session: {
       setPermissionRequestHandler: (handler: (webContents: unknown, permission: string, callback: (allowed: boolean) => void) => void) => {
         this.permissionHandler = handler;
@@ -58,6 +63,10 @@ class FakeWindow implements BrowserWindowLike {
 
   once(event: string, listener: (...args: unknown[]) => void): void {
     this.windowListeners.set(event, listener);
+  }
+
+  on(event: string, listener: (...args: unknown[]) => void): void {
+    this.nativeListeners.set(event, listener);
   }
 
   async loadURL(url: string): Promise<void> {
@@ -138,6 +147,18 @@ describe("Electron desktop runtime", () => {
         partition: "airgap-test-session",
       },
     }]);
+  });
+
+  test("bridges native window focus into the renderer without using DOM focus", async () => {
+    const { runtime, windows } = setup();
+    runtime.createWindow();
+    const fake = windows[0]!;
+
+    expect(fake.nativeListeners.has("focus")).toBe(true);
+    fake.nativeListeners.get("focus")!();
+    await vi.waitFor(() => expect(fake.executedScripts).toEqual([
+      'window.dispatchEvent(new Event("airgap-native-focus"));',
+    ]));
   });
 
   test("keeps devtools available only in an unpackaged development runtime", () => {

@@ -17,6 +17,7 @@ const CLICK_DISPOSITIONS = new Set(["foreground-tab", "background-tab"]);
 const EXTERNAL_URLS = new Set([REPOSITORY_URL, RELEASES_URL]);
 const ERR_ABORTED = -3;
 const USER_GESTURE_WINDOW_MS = 1_000;
+const NATIVE_FOCUS_SCRIPT = 'window.dispatchEvent(new Event("airgap-native-focus"));';
 
 export interface BrowserWindowOptionsLike {
   title: string;
@@ -42,6 +43,7 @@ interface NavigationEventLike {
 
 interface WebContentsLike {
   on(event: string, listener: (...args: any[]) => void): void;
+  executeJavaScript(script: string): Promise<unknown>;
   setWindowOpenHandler(handler: (details: {
     url: string;
     disposition: string;
@@ -63,6 +65,7 @@ interface WebContentsLike {
 
 export interface BrowserWindowLike {
   readonly webContents: WebContentsLike;
+  on(event: string, listener: (...args: any[]) => void): void;
   once(event: string, listener: (...args: any[]) => void): void;
   loadURL(url: string): Promise<void>;
   show(): void;
@@ -139,6 +142,11 @@ class ElectronDesktopWindow implements DesktopWindow {
       callback(false);
     });
     window.webContents.session.setPermissionCheckHandler(() => false);
+    window.on("focus", () => {
+      // DOM focus also fires when focus moves out of the preview iframe. Bridge the
+      // native BrowserWindow event so the renderer refreshes only on real app focus.
+      void window.webContents.executeJavaScript(NATIVE_FOCUS_SCRIPT).catch(() => {});
+    });
     window.webContents.on("before-mouse-event", (_event: unknown, mouse: { type: string }) => {
       if (mouse.type === "mouseUp") gestureExpiresAt = this.now() + USER_GESTURE_WINDOW_MS;
     });

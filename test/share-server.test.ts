@@ -418,7 +418,7 @@ describe("renderPage desktop surface", () => {
     expect(refresh).toContain('beginInteraction("refresh")');
     expect(refresh).toContain('endInteraction("refresh")');
     for (const handler of [
-      page.slice(page.indexOf('$("limit").onchange'), page.indexOf('window.addEventListener("focus"')),
+      page.slice(page.indexOf('$("limit").onchange'), page.indexOf("const focusEvent")),
       page.slice(page.indexOf('$("tools").onchange'), page.indexOf('$("language").onchange')),
       page.slice(page.indexOf('$("language").onchange'), page.indexOf("loadSessions();")),
     ]) {
@@ -426,6 +426,12 @@ describe("renderPage desktop surface", () => {
       expect(handler).toContain('endInteraction("settings")');
       expect(handler).toContain("finally");
     }
+  });
+
+  it("uses Electron's native focus signal instead of iframe focus transitions on desktop", () => {
+    expect(page).toContain('const focusEvent = SURFACE === "desktop" ? "airgap-native-focus" : "focus"');
+    expect(page).toContain("window.addEventListener(focusEvent, () => {");
+    expect(page).not.toContain('window.addEventListener("focus", () => {');
   });
 
   it("keeps selection controls out of the tab order while no conversation is loaded", () => {
