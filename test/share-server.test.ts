@@ -92,6 +92,26 @@ describe("renderPage (share picker shell)", () => {
     expect(page).toContain("var(--bg-subtle)");
     expect(page).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
   });
+
+  it("renders an accessible bilingual Tool display tooltip", () => {
+    const zh = renderPage(undefined, "summary", true, "zh-CN");
+    expect(zh).toContain('id="tool-help-trigger"');
+    expect(zh).toContain('type="button"');
+    expect(zh).toContain('aria-label="工具展示说明"');
+    expect(zh).toContain('aria-describedby="tool-help"');
+    expect(zh).toContain('id="tool-help" role="tooltip"');
+    expect(zh).toContain("完全不展示工具调用。");
+    expect(zh).toContain("展示工具名、关键参数和执行状态。");
+    expect(zh).toContain("富文本预览中展示输入与结果摘要；Markdown 和检索类工具仍使用摘要。");
+    expect(zh).toContain(".tool-help-wrap:hover .tool-help-tooltip");
+    expect(zh).toContain(".tool-help-wrap:focus-within .tool-help-tooltip");
+
+    const en = renderPage(undefined, "summary", true, "en");
+    expect(en).toContain('aria-label="About tool display"');
+    expect(en).toContain("Omits tool calls completely.");
+    expect(en).toContain("Shows the tool name, key argument, and execution status.");
+    expect(en).toContain("Shows input and result excerpts in rich previews; Markdown and search tools still use summaries.");
+  });
 });
 
 describe("renderPage internationalization", () => {

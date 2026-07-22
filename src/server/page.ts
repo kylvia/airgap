@@ -40,6 +40,7 @@ export function renderPage(
   const refreshMark = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13.2 7.2A5.4 5.4 0 1 0 13 9.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M13.2 3.8v3.5H9.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   // 设置入口的滑杆图标（inline SVG，零 emoji）
   const prefsMark = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="10.5" cy="4.5" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/><circle cx="5.5" cy="8" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/><circle cx="12" cy="11.5" r="1.7" fill="var(--bg)" stroke="currentColor" stroke-width="1.3"/></svg>';
+  const infoMark = '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="4.8" stroke="currentColor"/><path d="M6 5.3v3" stroke="currentColor" stroke-linecap="round"/><circle cx="6" cy="3.6" r=".55" fill="currentColor"/></svg>';
   const toolsOptions = (["none", "summary", "full"] as const)
     .map((v) => `<option value="${v}"${v === toolDisplay ? " selected" : ""}>${escapeHtml(t(`share.page.tool.${v}`))}</option>`)
     .join("");
@@ -98,6 +99,21 @@ ${THEME_CSS}
   #prefpanel .prow { display: flex; align-items: center; justify-content: space-between; gap: 18px;
     padding: 9px 0; font-size: 13px; color: var(--fg); }
   #prefpanel .prow + .prow { border-top: 1px solid var(--border-subtle); }
+  #prefpanel .pref-label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  #prefpanel .tool-help-wrap { position: relative; display: inline-flex; }
+  #prefpanel .tool-help-trigger { width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: 50%; background: var(--bg); color: var(--fg-muted); cursor: help; }
+  #prefpanel .tool-help-trigger:hover { border-color: var(--border-strong); color: var(--fg); background: var(--bg-hover); }
+  #prefpanel .tool-help-trigger:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #prefpanel .tool-help-tooltip { visibility: hidden; position: absolute; top: calc(100% + 7px); right: -4px;
+    z-index: 30; width: 310px; padding: 9px 11px; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-card); font-size: 12px; line-height: 1.55;
+    white-space: normal; }
+  #prefpanel .tool-help-tooltip > span { display: block; }
+  #prefpanel .tool-help-tooltip > span + span { margin-top: 5px; }
+  #prefpanel .tool-help-tooltip strong { font-weight: 600; }
+  #prefpanel .tool-help-wrap:hover .tool-help-tooltip,
+  #prefpanel .tool-help-wrap:focus-within .tool-help-tooltip { visibility: visible; }
   main { flex: 1; display: flex; min-height: 0; position: relative; }
   /* 切换会话/展示级别时盖住内容区：实色纸面（铁律禁半透明材质），品牌 mark 两块交替脉动。
      显隐用 display 硬切（不过渡 opacity/visibility）：headless 截图合成对这类过渡不可靠，且遮罩不需要淡入。 */
@@ -163,7 +179,20 @@ ${THEME_CSS}
         <option value="20">${escapeHtml(t("share.page.recent", { count: 20 }))}</option>
         <option value="50">${escapeHtml(t("share.page.recent", { count: 50 }))}</option>
       </select></div>
-      <div class="prow"><span>${escapeHtml(t("share.page.toolDisplay"))}</span><select id="tools">${toolsOptions}</select></div>
+      <div class="prow">
+        <span class="pref-label">
+          <span>${escapeHtml(t("share.page.toolDisplay"))}</span>
+          <span class="tool-help-wrap">
+            <button type="button" id="tool-help-trigger" class="tool-help-trigger" aria-label="${escapeHtml(t("share.page.toolHelpAria"))}" aria-describedby="tool-help">${infoMark}</button>
+            <span id="tool-help" role="tooltip" class="tool-help-tooltip">
+              <span><strong>${escapeHtml(t("share.page.tool.none"))}</strong> ${escapeHtml(t("share.page.toolHelp.none"))}</span>
+              <span><strong>${escapeHtml(t("share.page.tool.summary"))}</strong> ${escapeHtml(t("share.page.toolHelp.summary"))}</span>
+              <span><strong>${escapeHtml(t("share.page.tool.full"))}</strong> ${escapeHtml(t("share.page.toolHelp.full"))}</span>
+            </span>
+          </span>
+        </span>
+        <select id="tools">${toolsOptions}</select>
+      </div>
       <div class="prow"><span>${escapeHtml(t("share.page.language"))}</span><select id="language">${languageOptions}</select></div>
     </div>
   </header>
