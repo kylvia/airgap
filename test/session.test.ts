@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RuleMatch, SessionInfo, Turn } from "../src/types.js";
-import { peekTitle, pickSession, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../src/session.js";
+import { peekListTitle, pickSession, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../src/session.js";
 
 describe("turnTag", () => {
   it("flags non-question user turns", () => {
@@ -141,7 +141,7 @@ describe("pickSession", () => {
   });
 });
 
-describe("peekTitle", () => {
+describe("peekListTitle", () => {
   async function jsonlFile(lines: string[]): Promise<string> {
     const dir = await mkdtemp(path.join(os.tmpdir(), "airgap-title-"));
     const file = path.join(dir, "s.jsonl");
@@ -149,48 +149,64 @@ describe("peekTitle", () => {
     return file;
   }
 
-  it("取最新一条 ai-title（claude 会追加更新，晚出现的赢）", async () => {
+  it("keeps native-title precedence over the first user message", async () => {
     const f = await jsonlFile([
-      '{"type":"user","message":{"content":"hi"}}',
+      '{"type":"user","message":{"content":"第一条真实消息"}}',
+      '{"type":"ai-title","aiTitle":"AI 标题"}',
+      '{"type":"custom-title","customTitle":"旧用户标题"}',
+      '{"type":"ai-title","aiTitle":"更新的 AI 标题"}',
+      '{"type":"custom-title","customTitle":"用户标题"}',
+      '{"type":"ai-title","aiTitle":"更晚的 AI 标题"}',
+    ]);
+    expect(await peekListTitle(f, "claude")).toBe("用户标题");
+  });
+
+  it("uses the latest AI title when no custom title exists", async () => {
+    const f = await jsonlFile([
+      '{"type":"user","message":{"content":"第一条真实消息"}}',
       '{"type":"ai-title","aiTitle":"旧标题"}',
-      '{"type":"assistant","message":{"content":[]}}',
       '{"type":"ai-title","aiTitle":"新标题"}',
     ]);
-    expect(await peekTitle(f)).toBe("新标题");
+    expect(await peekListTitle(f, "claude")).toBe("新标题");
   });
 
-  it("没有 ai-title（codex / 未生成）→ null；空白标题不算", async () => {
-    expect(await peekTitle(await jsonlFile(['{"type":"user"}']))).toBeNull();
-    expect(await peekTitle(await jsonlFile(['{"type":"ai-title","aiTitle":"  "}']))).toBeNull();
-  });
-
-  it("文件不存在 → null，不抛", async () => {
-    expect(await peekTitle("/nonexistent/airgap-title.jsonl")).toBeNull();
-  });
-});
-
-describe("peekTitle: custom-title（用户 rename）优先", () => {
-  async function jsonlFile(lines: string[]): Promise<string> {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "airgap-ctitle-"));
-    const file = path.join(dir, "s.jsonl");
-    await writeFile(file, lines.join("\n") + "\n", "utf8");
-    return file;
-  }
-
-  it("rename 之后 Claude 仍会追加 ai-title——custom-title 必须永久赢，不是取最后一条", async () => {
+  it("uses the first substantive Claude prompt and skips non-title turns", async () => {
     const f = await jsonlFile([
-      '{"type":"ai-title","aiTitle":"AI 起的标题"}',
-      '{"type":"custom-title","customTitle":"我改的标题"}',
-      '{"type":"ai-title","aiTitle":"AI 又起了一个"}',
+      '{"type":"user","isMeta":true,"message":{"content":"meta"}}',
+      '{"type":"user","isSidechain":true,"message":{"content":"sidechain"}}',
+      '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}',
+      '{"type":"user","message":{"content":"/model opus"}}',
+      '{"type":"user","message":{"content":"<task-notification>done</task-notification>"}}',
+      '{"type":"user","message":{"content":"<ide_selection>noise</ide_selection>"}}',
+      '{"type":"user","message":{"content":[{"type":"image"}]}}',
+      '{"type":"user","message":{"content":[{"type":"document"}]}}',
+      '{"type":"user","message":{"content":"  修复   登录页\\n的报错  "}}',
+      '{"type":"user","message":{"content":"后续消息"}}',
     ]);
-    expect(await peekTitle(f)).toBe("我改的标题");
+    expect(await peekListTitle(f, "claude")).toBe("修复 登录页 的报错");
   });
 
-  it("多次 rename 取最新一条 custom-title", async () => {
+  it("uses the first substantive Codex prompt after scaffolding", async () => {
     const f = await jsonlFile([
-      '{"type":"custom-title","customTitle":"第一次改"}',
-      '{"type":"custom-title","customTitle":"第二次改"}',
+      '{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"system"}]}}',
+      '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>noise</user_instructions>"}]}}',
+      '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"查一下 8080 端口"}]}}',
     ]);
-    expect(await peekTitle(f)).toBe("第二次改");
+    expect(await peekListTitle(f, "codex")).toBe("查一下 8080 端口");
+  });
+
+  it("bounds generated titles to 60 visible characters", async () => {
+    const prompt = "x".repeat(80);
+    const f = await jsonlFile([JSON.stringify({ type: "user", message: { content: prompt } })]);
+    const title = await peekListTitle(f, "claude");
+    expect(title).toBe(`${"x".repeat(59)}…`);
+    expect(title).toHaveLength(60);
+  });
+
+  it("fails soft for missing, malformed, and candidate-free files", async () => {
+    expect(await peekListTitle("/nonexistent/airgap-title.jsonl", "claude")).toBeNull();
+    expect(
+      await peekListTitle(await jsonlFile(["not json", '{"type":"ai-title","aiTitle":"  "}', '{"type":"user"}']), "claude"),
+    ).toBeNull();
   });
 });

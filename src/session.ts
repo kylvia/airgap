@@ -1,7 +1,8 @@
 import path from "node:path";
-import type { JsonlRecord, RuleMatch, SessionInfo, Turn } from "./types.js";
+import type { JsonlRecord, RuleMatch, SessionInfo, SessionSource, Turn } from "./types.js";
 import { createRedactor } from "./redact.js";
 import { createI18n, type Locale } from "./i18n/index.js";
+import { userTextFromRecord } from "./render/turns.js";
 import { streamLines, tryParse } from "./util/jsonl.js";
 
 /** Collapse all whitespace runs to single spaces and trim. */
@@ -40,31 +41,43 @@ export function sessionTitle(records: JsonlRecord[], info: SessionInfo, locale: 
   return `${base} · ${createI18n(locale).t("share.page.fallbackTitle")}`;
 }
 
+const LIST_TITLE_MAX = 60;
+
+function generatedListTitle(userText: string): string | null {
+  const title = oneLine(userText);
+  if (!title || turnTag(title) !== "") return null;
+  if (/^(?:\[图片\]|\[文档\])(?:\s*(?:\[图片\]|\[文档\]))*$/.test(title)) return null;
+  return title.length > LIST_TITLE_MAX ? `${title.slice(0, LIST_TITLE_MAX - 1)}…` : title;
+}
+
 /**
- * Stream-scan a transcript for its title WITHOUT loading records into memory — cheap
- * enough to run across the whole session-picker list. Same precedence as sessionTitle:
- * custom-title (user rename) beats ai-title regardless of order. Lines are prefiltered
- * by the shared `-title"` substring so non-matching lines are never JSON-parsed
- * (codex has neither record type → null). Returns null on any read error.
+ * Stream-scan a transcript for a picker title without loading it into memory.
+ * Native custom/AI titles win; otherwise use the first substantive user message.
+ * After finding that fallback, only later title records need JSON parsing.
  */
-export async function peekTitle(file: string): Promise<string | null> {
+export async function peekListTitle(file: string, source: SessionSource): Promise<string | null> {
   let ai: string | null = null;
   let custom: string | null = null;
+  let generated: string | null = null;
   try {
     for await (const { line } of streamLines(file)) {
-      if (!line.includes('-title"')) continue;
+      const titleLine = line.includes('-title"');
+      if (!titleLine && generated !== null) continue;
       const j = tryParse(line);
       if (!j) continue;
       if (j["type"] === "custom-title" && typeof j["customTitle"] === "string" && j["customTitle"].trim()) {
         custom = j["customTitle"].trim();
       } else if (j["type"] === "ai-title" && typeof j["aiTitle"] === "string" && j["aiTitle"].trim()) {
         ai = j["aiTitle"].trim();
+      } else if (generated === null) {
+        const userText = userTextFromRecord(j, source);
+        if (userText !== null) generated = generatedListTitle(userText);
       }
     }
   } catch {
     return null;
   }
-  return custom ?? ai;
+  return custom ?? ai ?? generated;
 }
 
 /** --session prefix wins; otherwise the cwd-matching session, else the most recent. */

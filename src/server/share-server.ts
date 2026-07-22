@@ -13,7 +13,7 @@ import { extractTurns } from "../render/turns.js";
 import { renderHtml, renderTurnBlock } from "../render/html.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
-import { oneLine, peekTitle, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../session.js";
+import { oneLine, peekListTitle, pickSession, readRecords, redactTurns, scanOneTurn, scanTurns, sessionTitle, turnTag } from "../session.js";
 import { renderPage } from "./page.js";
 import {
   LANGUAGE_PREFERENCES,
@@ -121,14 +121,14 @@ async function listSessions(limit: number, ensureId?: string): Promise<SessionSu
     const hit = sorted.find((s) => s.id === ensureId);
     if (hit) top.push(hit);
   }
-  // 标题并行流扫（peekTitle 只 parse 命中 ai-title 预过滤的行，几十个会话数百 ms 级）
+  // 标题并行流扫：原生标题优先；无标题时取首条有效用户消息，仍保持常量内存。
   return Promise.all(
     top.map(async (s) => ({
       id: s.id,
       project: s.cwd ? path.basename(s.cwd) : s.project,
       source: s.source,
       mtimeMs: s.mtimeMs,
-      title: await peekTitle(s.file),
+      title: await peekListTitle(s.file, s.source),
     })),
   );
 }
