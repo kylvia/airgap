@@ -282,12 +282,9 @@ function extractClaudeTurns(records: JsonlRecord[]): Turn[] {
     if (j["isSidechain"] === true) continue; // 子代理侧链不进主对话
     const type = j["type"];
     if (type === "user") {
-      if (j["isMeta"] === true) continue;
-      if (j["isCompactSummary"] === true) continue; // 压缩摘要是簿记，不是用户发言
       const message = asRecord(j["message"]);
-      if (!message) continue;
-      absorbClaudeToolResult(j, toolIndex); // 先把工具结果回填到对应卡片
-      const userText = claudeUserText(message["content"]);
+      if (message) absorbClaudeToolResult(j, toolIndex); // 先把工具结果回填到对应卡片
+      const userText = userTextFromRecord(j, "claude");
       if (userText === null) continue; // tool_result 承载 / 空内容：不开新 turn
       current = { index: turns.length + 1, userText, assistant: [], timestamp: recordTimestamp(j) };
       turns.push(current);
@@ -317,6 +314,22 @@ function codexMessageText(content: unknown): string {
     }
   }
   return parts.join("\n").trim();
+}
+
+/** Extract visible user text from one source-specific record, or null for scaffolding/noise. */
+export function userTextFromRecord(j: Record<string, unknown>, source: SessionSource): string | null {
+  if (source === "claude") {
+    if (j["type"] !== "user") return null;
+    if (j["isSidechain"] === true || j["isMeta"] === true || j["isCompactSummary"] === true) return null;
+    const message = asRecord(j["message"]);
+    return message ? claudeUserText(message["content"]) : null;
+  }
+
+  if (j["type"] !== "response_item") return null;
+  const payload = asRecord(j["payload"]);
+  if (!payload || payload["type"] !== "message" || payload["role"] !== "user") return null;
+  const text = codexMessageText(payload["content"]);
+  return text && !isCodexScaffold(text) ? text : null;
 }
 
 function codexReasoningText(payload: Record<string, unknown>): string {
@@ -349,8 +362,9 @@ function extractCodexTurns(records: JsonlRecord[]): Turn[] {
       const role = payload["role"];
       const text = codexMessageText(payload["content"]);
       if (role === "user") {
-        if (!text || isCodexScaffold(text)) continue;
-        current = { index: turns.length + 1, userText: text, assistant: [], timestamp: recordTimestamp(j) };
+        const userText = userTextFromRecord(j, "codex");
+        if (userText === null) continue;
+        current = { index: turns.length + 1, userText, assistant: [], timestamp: recordTimestamp(j) };
         turns.push(current);
       } else if (role === "assistant") {
         if (current && text) current.assistant.push({ kind: "text", text });

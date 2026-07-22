@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JsonlRecord } from "../src/types.js";
 import { tryParse } from "../src/util/jsonl.js";
-import { extractTurns } from "../src/render/turns.js";
+import { extractTurns, userTextFromRecord } from "../src/render/turns.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,6 +15,57 @@ function loadFixture(name: string): JsonlRecord[] {
     .filter((l) => l.trim().length > 0)
     .map((line, i) => ({ raw: line, lineNo: i + 1, json: tryParse(line) }));
 }
+
+describe("userTextFromRecord", () => {
+  it("extracts a real Claude user message and rejects metadata/tool carriers", () => {
+    expect(
+      userTextFromRecord(
+        { type: "user", message: { role: "user", content: "  修复这个报错  " } },
+        "claude",
+      ),
+    ).toBe("修复这个报错");
+    expect(
+      userTextFromRecord(
+        { type: "user", isMeta: true, message: { role: "user", content: "injected" } },
+        "claude",
+      ),
+    ).toBeNull();
+    expect(
+      userTextFromRecord(
+        {
+          type: "user",
+          message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+        },
+        "claude",
+      ),
+    ).toBeNull();
+  });
+
+  it("extracts a real Codex user message and rejects injected scaffolding", () => {
+    expect(
+      userTextFromRecord(
+        {
+          type: "response_item",
+          payload: { type: "message", role: "user", content: [{ type: "input_text", text: "修复登录页" }] },
+        },
+        "codex",
+      ),
+    ).toBe("修复登录页");
+    expect(
+      userTextFromRecord(
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "<environment_context>noise</environment_context>" }],
+          },
+        },
+        "codex",
+      ),
+    ).toBeNull();
+  });
+});
 
 describe("extractTurns · claude", () => {
   const turns = extractTurns(loadFixture("claude-mini.jsonl"), "claude");
