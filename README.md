@@ -150,7 +150,7 @@ npx airgap show --md --out clip.md
 
 `show` renders selected turns as a chat-bubble transcript to **Markdown**, a **single-file HTML**, or a **long-image PNG** (PNG needs a local Chrome/Chromium). It runs the same secret scan on the selected content first and makes you confirm before exporting anything that still contains a hit.
 
-Embedded user images are preserved in HTML/PNG exports, but airgap cannot inspect or redact secrets inside image pixels. An image export therefore requires manual confirmation; in a non-interactive shell, review the images first and pass `--yes` to accept that risk. Markdown omits image bytes and keeps an `[Image]` placeholder.
+HTML/PNG exports may contain image bytes from embedded user images or inline `data:image` Markdown, but airgap cannot inspect or redact secrets inside image pixels. An export containing those bytes therefore requires manual confirmation; in a non-interactive shell, review the images first and pass `--yes` to accept that risk. Markdown removes supported inline-image bytes and keeps a text placeholder.
 
 ## Update notices
 
@@ -191,7 +191,7 @@ Read this before you trust a pack with anything sensitive.
 - **Findings are confidence-graded.** High-confidence rules key off real credential prefixes (`sk-ant-`, `ghp_`, `AKIA…`, `AIza…`, `sk-proj-`, PEM blocks, …) and are the ones worth acting on immediately. Broad heuristics (`generic-assignment`, `env-dump`, `bearer-token`, `jwt`) catch *suspected* material and include false positives — treat them as "look here", not "this is a live key".
 - **A pack is neither encrypted nor authenticated.** Anyone who receives it can read its contents. Manifest hashes detect changes or damage to manifest-declared entries; because the manifest is not signed, they do not prove who created the pack or prevent someone from changing both the contents and their hashes.
 - **`open` independently scans before install.** It does not rely on the manifest's redaction claims and refuses to install declared contents that still match a secret rule unless you pass `--accept-risk`.
-- **Image contents are not scanned or redacted.** HTML/PNG export preserves supported embedded user images only after a separate manual-risk confirmation. `--redact` applies to text, not pixels; Markdown omits the image bytes.
+- **Image contents are not scanned or redacted.** HTML/PNG export preserves supported embedded user images and inline `data:image` Markdown only after a separate manual-risk confirmation. `--redact` applies to text, not pixels; Markdown removes supported inline-image bytes.
 - **Resume compatibility is version-sensitive.** The `~/.claude` install + resume path was verified against **claude 2.1.197/198**. Claude Code's on-disk format can drift; if a future version fails to resume an installed pack, use the fallback `claude --resume <absolute-path> --fork-session` command that `open` prints, and please file an issue.
 
 ## Development and contributing

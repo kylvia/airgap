@@ -10,6 +10,7 @@ import { scanString } from "../detect/scanner.js";
 import { extractTurns } from "../render/turns.js";
 import { renderMarkdown } from "../render/markdown.js";
 import { renderHtml } from "../render/html.js";
+import { turnsContainImageBytes } from "../render/image-data.js";
 import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
 import { oneLine, pickSession, readRecords, redactTurns, scanTurns, sessionTitle } from "../session.js";
 
@@ -35,8 +36,9 @@ export function showImageRiskAction(
   format: ShowFormat,
   yes: boolean,
   interactive: boolean,
+  extraText: readonly string[] = [],
 ): ShowImageRiskAction {
-  if (format === "md" || !turns.some((turn) => (turn.userImages?.length ?? 0) > 0)) return "allow";
+  if (format === "md" || !turnsContainImageBytes(turns, extraText)) return "allow";
   if (yes) return "allow";
   return interactive ? "confirm" : "block";
 }
@@ -143,10 +145,17 @@ export function registerShow(program: Command): void {
       }
 
       const format: ShowFormat = opts.png ? "png" : opts.md ? "md" : "html";
+      const title = sessionTitle(records, info);
 
       // 4. 图片内容不进入文字检测器，也无法自动脱敏。HTML/PNG 嵌入图片字节前必须人工确认。
-      const imageRisk = showImageRiskAction(selected, format, opts.yes === true, process.stdin.isTTY === true);
-      const embedsImages = format !== "md" && selected.some((turn) => (turn.userImages?.length ?? 0) > 0);
+      const imageRisk = showImageRiskAction(
+        selected,
+        format,
+        opts.yes === true,
+        process.stdin.isTTY === true,
+        [title],
+      );
+      const embedsImages = format !== "md" && turnsContainImageBytes(selected, [title]);
       if (embedsImages) {
         console.error(pc.yellow("⚠ 选中内容包含图片。airgap 无法检查或隐藏图片中的密钥，请人工确认图片安全后再继续。"));
         if (imageRisk === "block") {
@@ -203,7 +212,7 @@ export function registerShow(program: Command): void {
       // 6. 渲染 + 写出
       const lastTs = selected[selected.length - 1]?.timestamp;
       const meta = {
-        title: sessionTitle(records, info),
+        title,
         date: (lastTs ?? new Date(info.mtimeMs).toISOString()).slice(0, 10),
       };
       const outFile = path.resolve(opts.out ?? `airgap-show-${info.id.slice(0, 8)}.${format}`);

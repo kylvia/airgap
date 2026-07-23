@@ -69,7 +69,7 @@ See [Airgap Desktop](./apps/desktop/README.md) before running GUI smoke tests or
 - Treat transcript Markdown and tool output as untrusted input.
 - Keep exported HTML and the Share UI free of remote assets.
 - Do not weaken raw-HTML escaping, URL validation, image restrictions, loopback binding, or capability-token checks.
-- Treat inline image pixels as unscannable: HTML/PNG export must require explicit manual-risk acceptance, `--redact` must not imply pixel redaction, and Markdown must omit image bytes.
+- Treat inline image pixels as unscannable: HTML/PNG export must require explicit manual-risk acceptance for structured images and textual `data:image` payloads, `--redact` must not imply pixel redaction, and Markdown must strip supported image bytes.
 - Keep CLI `show` and Share image-risk behavior aligned.
 - Update rendering and Share regression tests together with visible behavior.
 

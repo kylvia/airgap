@@ -18,6 +18,9 @@ const cleanTurn: Turn = {
   assistant: [{ kind: "text", text: "world" }],
 };
 
+const inlinePng =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z7VwAAAAASUVORK5CYII=";
+
 const selection: ExportSelection = {
   turns: [cleanTurn],
   title: "Conversation",
@@ -230,6 +233,26 @@ describe("Share export coordinator", () => {
     expect(adapter.renderPng).toHaveBeenCalledOnce();
   });
 
+  it("blocks image bytes embedded in assistant Markdown", async () => {
+    const withMarkdownImage: ExportSelection = {
+      ...selection,
+      turns: [{
+        ...cleanTurn,
+        assistant: [{ kind: "text", text: `![secret screenshot](${inlinePng})` }],
+      }],
+    };
+    const { adapter } = fakeAdapter();
+
+    const result = await coordinator(adapter, withMarkdownImage).export(baseRequest);
+
+    expect(result).toMatchObject({
+      outcome: "error",
+      code: "EXPORT_IMAGE_RISK",
+      blocked: true,
+    });
+    expect(adapter.renderPng).not.toHaveBeenCalled();
+  });
+
   it("blocks image download even if a caller mismatches the declared format", async () => {
     const withImage: ExportSelection = {
       ...selection,
@@ -266,6 +289,25 @@ describe("Share export coordinator", () => {
 
     expect(result).toMatchObject({ outcome: "success", code: "TEXT_COPIED" });
     expect(adapter.copyText).toHaveBeenCalledWith(expect.stringContaining("[图片]"));
+  });
+
+  it("strips assistant Markdown image bytes before copying Markdown", async () => {
+    const withMarkdownImage: ExportSelection = {
+      ...selection,
+      turns: [{
+        ...cleanTurn,
+        assistant: [{ kind: "text", text: `![secret screenshot](${inlinePng})` }],
+      }],
+    };
+    const { adapter } = fakeAdapter();
+
+    const result = await coordinator(adapter, withMarkdownImage).export({ ...baseRequest, format: "md" });
+
+    expect(result).toMatchObject({ outcome: "success", code: "TEXT_COPIED" });
+    const copied = vi.mocked(adapter.copyText!).mock.calls[0]![0];
+    expect(copied).toContain("[图片]");
+    expect(copied).not.toContain("data:image/");
+    expect(copied).not.toContain("iVBORw0KGgo");
   });
 
   it("redacts before rendered text reaches the clipboard adapter", async () => {

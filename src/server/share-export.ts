@@ -7,6 +7,7 @@ import type { RuleMatch, ToolDisplay, Turn } from "../types.js";
 import { scanString } from "../detect/scanner.js";
 import { renderHtml } from "../render/html.js";
 import { renderMarkdown } from "../render/markdown.js";
+import { turnsContainImageBytes } from "../render/image-data.js";
 import { findChrome, renderPngViaChrome } from "../render/screenshot.js";
 import { redactTurns, scanTurns } from "../session.js";
 import { createI18n, type Locale } from "../i18n/index.js";
@@ -220,7 +221,7 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
     const titleTurn: Turn = { index: -1, userText: title, timestamp: null, assistant: [] };
     let redactNote = "";
     const embedsImages = (request.action === "download" || request.format !== "md")
-      && turns.some((turn) => (turn.userImages?.length ?? 0) > 0);
+      && turnsContainImageBytes(turns, [title]);
     if (embedsImages && !request.acceptRisk) {
       return errorResult("EXPORT_IMAGE_RISK", i18n.t("share.api.imageRisk"), true);
     }

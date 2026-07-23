@@ -4,6 +4,8 @@ import { renderMarkdown } from "../src/render/markdown.js";
 import { renderHtml, markdownToHtml, escapeHtml } from "../src/render/html.js";
 
 const meta = { title: "demo 会话片段", date: "2026-07-01" };
+const inlinePng =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z7VwAAAAASUVORK5CYII=";
 
 const turns: Turn[] = [
   {
@@ -86,6 +88,20 @@ describe("renderMarkdown", () => {
     expect(md).toContain("[图片]");
     expect(md).not.toContain("data:image/");
     expect(md).not.toContain("QUJDRA==");
+  });
+
+  it("剥离文本字段里的内联图片字节", () => {
+    const withInlineData: Turn = {
+      index: 1,
+      userText: `用户粘贴 ${inlinePng}`,
+      assistant: [{ kind: "text", text: `![secret screenshot](${inlinePng})` }],
+      timestamp: null,
+    };
+    const output = renderMarkdown([withInlineData], { title: `标题 ${inlinePng}`, date: meta.date });
+
+    expect(output).not.toContain("data:image/");
+    expect(output).not.toContain("iVBORw0KGgo");
+    expect(output.match(/\[图片\]/g)).toHaveLength(3);
   });
 });
 

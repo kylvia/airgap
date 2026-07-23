@@ -1,6 +1,7 @@
 import type { ToolDisplay, Turn } from "../types.js";
 import { DEFAULT_TOOL_DISPLAY } from "../types.js";
 import { createI18n, type Locale } from "../i18n/index.js";
+import { stripInlineImageData } from "./image-data.js";
 
 function blockquote(s: string): string {
   return s
@@ -49,5 +50,5 @@ export function renderMarkdown(
       }
     }
   }
-  return `${out.join("\n").trimEnd()}\n`;
+  return `${stripInlineImageData(out.join("\n")).trimEnd()}\n`;
 }

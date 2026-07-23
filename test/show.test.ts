@@ -2,12 +2,24 @@ import { describe, expect, it } from "vitest";
 import { showImageRiskAction } from "../src/commands/show.js";
 import type { Turn } from "../src/types.js";
 
+const INLINE_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z7VwAAAAASUVORK5CYII=";
+
 function turnWithImage(): Turn {
   return {
     index: 1,
     userText: "[图片]",
     userImages: [{ mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" }],
     assistant: [],
+    timestamp: null,
+  };
+}
+
+function turnWithMarkdownImage(): Turn {
+  return {
+    index: 1,
+    userText: "hello",
+    assistant: [{ kind: "text", text: `![secret screenshot](${INLINE_PNG})` }],
     timestamp: null,
   };
 }
@@ -33,5 +45,10 @@ describe("showImageRiskAction", () => {
   it("does not affect image-free HTML export", () => {
     const turn: Turn = { index: 1, userText: "hello", assistant: [], timestamp: null };
     expect(showImageRiskAction([turn], "html", false, false)).toBe("allow");
+  });
+
+  it("blocks image bytes embedded in assistant Markdown", () => {
+    expect(showImageRiskAction([turnWithMarkdownImage()], "html", false, false)).toBe("block");
+    expect(showImageRiskAction([turnWithMarkdownImage()], "png", false, true)).toBe("confirm");
   });
 });
