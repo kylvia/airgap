@@ -144,6 +144,7 @@ export const en = {
   "render.tool.completed": "Completed",
   "share.api.exportRisk": "Selected content contains {count} possible secrets ({brief}{more}). Confirm the risk to retry unchanged, or enable redaction.",
   "share.api.exportRisk.one": "Selected content contains {count} possible secret ({brief}{more}). Confirm the risk to retry unchanged, or enable redaction.",
+  "share.api.imageRisk": "Selected content contains images. Airgap cannot scan or hide secrets inside images; check them manually before continuing.",
   "share.api.more": " and others",
   "share.api.noSelection": "No turns selected",
   "share.api.redactedNote": " ({count} possible secrets redacted)",

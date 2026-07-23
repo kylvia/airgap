@@ -114,6 +114,7 @@ export function scanTurns(turns: Turn[], scan: (s: string) => RuleMatch[]): Rule
   };
   for (const turn of turns) {
     visit(turn.userText);
+    visit(turn.userDisplayText);
     for (const block of turn.assistant) {
       visit(block.text);
       visit(block.toolInput);
@@ -129,11 +130,11 @@ export function scanOneTurn(turn: Turn, scan: (s: string) => RuleMatch[]): RuleM
 }
 
 /**
- * Redact every rendered string in the given turns (userText + each block's text / toolInput /
- * toolResult) with ONE consistency map — the same secret maps to the same placeholder across
- * all fields, exactly like a pack. Returns fresh turns (inputs untouched) plus the count of
- * distinct secrets redacted, for an export receipt. Fail-closed: the underlying redactor throws
- * if any secret survives, so redacted turns are guaranteed clean.
+ * Redact every rendered string in the given turns (canonical/display user text + each block's
+ * text / toolInput / toolResult) with ONE consistency map — the same secret maps to the same
+ * placeholder across all fields, exactly like a pack. Returns fresh turns (inputs untouched)
+ * plus the count of distinct secrets redacted, for an export receipt. Fail-closed: the underlying
+ * redactor throws if any secret survives, so redacted turns are guaranteed clean.
  */
 export function redactTurns(turns: Turn[], scan: (s: string) => RuleMatch[]): { turns: Turn[]; count: number } {
   const redactor = createRedactor(scan);
@@ -141,6 +142,7 @@ export function redactTurns(turns: Turn[], scan: (s: string) => RuleMatch[]): { 
   const out: Turn[] = turns.map((t) => ({
     ...t,
     userText: redactor.redactText(t.userText),
+    ...(t.userDisplayText !== undefined ? { userDisplayText: redactor.redactText(t.userDisplayText) } : {}),
     assistant: t.assistant.map((b) => ({
       ...b,
       text: redactor.redactText(b.text),
@@ -161,7 +163,7 @@ export function turnTag(userText: string, locale: Locale = "zh-CN"): string {
   const i18n = createI18n(locale);
   const t = userText.trim();
   if (t.startsWith("<task-notification") || t.startsWith("<task-id")) return i18n.t("share.tag.task");
-  if (t.startsWith("[图片]") || t === "[图片]") return i18n.t("share.tag.image");
+  if (/^(?:\[图片\]\s*)+$/.test(t)) return i18n.t("share.tag.image");
   if (t.startsWith("/")) return i18n.t("share.tag.command");
   if (t.startsWith("<ide_selection") || t.startsWith("<local-command") || t.startsWith("<command-name")) return i18n.t("share.tag.system");
   return "";

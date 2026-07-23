@@ -190,6 +190,84 @@ describe("Share export coordinator", () => {
     expect(html).toContain("REDACTED");
   });
 
+  it("blocks image exports until the user confirms images were checked manually", async () => {
+    const withImage: ExportSelection = {
+      ...selection,
+      turns: [{
+        ...cleanTurn,
+        userText: "[图片]",
+        userImages: [{ mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" }],
+      }],
+    };
+    const { adapter } = fakeAdapter();
+
+    const result = await coordinator(adapter, withImage).export(baseRequest);
+
+    expect(result).toMatchObject({
+      outcome: "error",
+      code: "EXPORT_IMAGE_RISK",
+      blocked: true,
+      message: expect.stringMatching(/cannot (?:scan|check).*image/i),
+    });
+    expect(adapter.renderPng).not.toHaveBeenCalled();
+    expect(adapter.copyImage).not.toHaveBeenCalled();
+  });
+
+  it("continues an image export after explicit risk confirmation", async () => {
+    const withImage: ExportSelection = {
+      ...selection,
+      turns: [{
+        ...cleanTurn,
+        userText: "[图片]",
+        userImages: [{ mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" }],
+      }],
+    };
+    const { adapter } = fakeAdapter();
+
+    const result = await coordinator(adapter, withImage).export({ ...baseRequest, acceptRisk: true });
+
+    expect(result).toMatchObject({ outcome: "success", code: "IMAGE_COPIED" });
+    expect(adapter.renderPng).toHaveBeenCalledOnce();
+  });
+
+  it("blocks image download even if a caller mismatches the declared format", async () => {
+    const withImage: ExportSelection = {
+      ...selection,
+      turns: [{
+        ...cleanTurn,
+        userText: "[图片]",
+        userImages: [{ mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" }],
+      }],
+    };
+    const { adapter } = fakeAdapter();
+
+    const result = await coordinator(adapter, withImage).export({
+      ...baseRequest,
+      action: "download",
+      format: "md",
+    });
+
+    expect(result).toMatchObject({ outcome: "error", code: "EXPORT_IMAGE_RISK", blocked: true });
+    expect(adapter.renderPng).not.toHaveBeenCalled();
+  });
+
+  it("copies Markdown without an image-risk prompt because image bytes are omitted", async () => {
+    const withImage: ExportSelection = {
+      ...selection,
+      turns: [{
+        ...cleanTurn,
+        userText: "查看截图\n[图片]",
+        userImages: [{ mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" }],
+      }],
+    };
+    const { adapter } = fakeAdapter();
+
+    const result = await coordinator(adapter, withImage).export({ ...baseRequest, format: "md" });
+
+    expect(result).toMatchObject({ outcome: "success", code: "TEXT_COPIED" });
+    expect(adapter.copyText).toHaveBeenCalledWith(expect.stringContaining("[图片]"));
+  });
+
   it("redacts before rendered text reaches the clipboard adapter", async () => {
     const secret = "sk-ant-LEAK";
     const finding: RuleMatch = { ruleId: "anthropic-key", severity: "critical", secret, preview: "sk-a…LEAK" };

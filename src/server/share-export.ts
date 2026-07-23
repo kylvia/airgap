@@ -219,6 +219,11 @@ export function createShareExportCoordinator(options: ShareExportCoordinatorOpti
     let title = selection.title;
     const titleTurn: Turn = { index: -1, userText: title, timestamp: null, assistant: [] };
     let redactNote = "";
+    const embedsImages = (request.action === "download" || request.format !== "md")
+      && turns.some((turn) => (turn.userImages?.length ?? 0) > 0);
+    if (embedsImages && !request.acceptRisk) {
+      return errorResult("EXPORT_IMAGE_RISK", i18n.t("share.api.imageRisk"), true);
+    }
     if (request.redact) {
       const redacted = redactTurns([titleTurn, ...turns], scan);
       title = redacted.turns[0]!.userText;

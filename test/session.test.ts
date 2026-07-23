@@ -19,6 +19,11 @@ describe("turnTag", () => {
     expect(turnTag("  hello  ")).toBe("");
   });
 
+  it("only tags image-only messages and keeps mixed image/text messages as normal turns", () => {
+    expect(turnTag("[图片]\n[图片]")).toBe("图片");
+    expect(turnTag("[图片]\n请分析这个报错")).toBe("");
+  });
+
   it("returns English system tags when requested", () => {
     expect(turnTag("<task-notification>\n...", "en")).toBe("Task notification");
     expect(turnTag("/model claude", "en")).toBe("Command");
@@ -76,6 +81,17 @@ describe("scanTurns / scanOneTurn", () => {
     };
     expect(scanTurns([t], scan)).toHaveLength(1);
   });
+
+  it("scans display-only user text", () => {
+    const t: Turn = {
+      index: 1,
+      userText: "[图片]",
+      userDisplayText: "key sk-ant-LEAK",
+      assistant: [],
+      timestamp: null,
+    };
+    expect(scanTurns([t], scan)).toHaveLength(1);
+  });
 });
 
 describe("redactTurns", () => {
@@ -111,6 +127,21 @@ describe("redactTurns", () => {
     const placeholder = out.userText.replace("key ", "");
     expect(out.assistant[0]!.toolInput).toBe(`echo ${placeholder}`);
     expect(out.assistant[0]!.toolResult).toBe(placeholder);
+  });
+
+  it("redacts display-only user text", () => {
+    const t: Turn = {
+      index: 1,
+      userText: "[图片]",
+      userDisplayText: "key sk-ant-LEAK",
+      assistant: [],
+      timestamp: null,
+    };
+    const { turns, count } = redactTurns([t], scan);
+
+    expect(count).toBe(1);
+    expect(turns[0]!.userDisplayText).not.toContain("sk-ant-LEAK");
+    expect(turns[0]!.userDisplayText).toContain("REDACTED");
   });
 });
 
@@ -184,6 +215,22 @@ describe("peekListTitle", () => {
       '{"type":"user","message":{"content":"后续消息"}}',
     ]);
     expect(await peekListTitle(f, "claude")).toBe("修复 登录页 的报错");
+  });
+
+  it("uses text after an inline image as the generated title", async () => {
+    const f = await jsonlFile([
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJDRA==" } },
+            { type: "text", text: "请分析这个报错" },
+          ],
+        },
+      }),
+    ]);
+
+    expect(await peekListTitle(f, "claude")).toBe("[图片] 请分析这个报错");
   });
 
   it("uses the first substantive Codex prompt after scaffolding", async () => {

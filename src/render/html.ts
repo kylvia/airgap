@@ -323,18 +323,21 @@ function renderUserContent(turn: Turn, i18n: I18n): string {
       && match[2].length % 4 === 0,
     );
   });
-  let resolved = images.length;
-  const visibleText = turn.userText
-    .split("\n")
-    .filter((line) => {
-      if (resolved > 0 && line.trim() === "[图片]") {
-        resolved -= 1;
-        return false;
-      }
-      return true;
-    })
-    .join("\n")
-    .trim();
+  let visibleText = turn.userDisplayText;
+  if (visibleText === undefined) {
+    let resolved = images.length;
+    visibleText = turn.userText
+      .split("\n")
+      .filter((line) => {
+        if (resolved > 0 && line.trim() === "[图片]") {
+          resolved -= 1;
+          return false;
+        }
+        return true;
+      })
+      .join("\n");
+  }
+  visibleText = visibleText.trim();
   const text = visibleText
     ? `<div class="user-text">${escapeHtml(visibleText).replace(/\n/g, "<br>")}</div>`
     : "";

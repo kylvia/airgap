@@ -190,20 +190,48 @@ function claudeImage(block: Record<string, unknown>): UserImage | null {
     : null;
 }
 
-function imagesFromContent(content: unknown, source: SessionSource): UserImage[] {
-  if (!Array.isArray(content)) return [];
+interface UserContentPresentation {
+  images: UserImage[];
+  displayText?: string;
+}
+
+function presentationFromContent(content: unknown, source: SessionSource): UserContentPresentation {
+  if (!Array.isArray(content)) return { images: [] };
   const images: UserImage[] = [];
+  const displayParts: string[] = [];
+  let sawImage = false;
   for (const item of content) {
     const block = asRecord(item);
     if (!block) continue;
-    const image = source === "claude"
-      ? claudeImage(block)
-      : block["type"] === "input_image"
-        ? parseInlineImageDataUrl(block["image_url"])
-        : null;
-    if (image) images.push(image);
+    if (source === "claude") {
+      if (block["type"] === "text" && typeof block["text"] === "string") {
+        const cleaned = cleanClaudeUserString(block["text"]);
+        if (cleaned !== null) displayParts.push(cleaned);
+      } else if (block["type"] === "image") {
+        sawImage = true;
+        const image = claudeImage(block);
+        if (image) images.push(image);
+        else displayParts.push("[图片]");
+      } else if (block["type"] === "document") {
+        displayParts.push("[文档]");
+      }
+    } else if (
+      (block["type"] === "input_text" || block["type"] === "text")
+      && typeof block["text"] === "string"
+      && block["text"].trim()
+    ) {
+      displayParts.push(block["text"].trim());
+    } else if (block["type"] === "input_image") {
+      sawImage = true;
+      const image = parseInlineImageDataUrl(block["image_url"]);
+      if (image) images.push(image);
+      else displayParts.push("[图片]");
+    }
   }
-  return images;
+  return {
+    images,
+    ...(sawImage ? { displayText: displayParts.join("\n").trim() } : {}),
+  };
 }
 
 // ---------- Claude ----------
@@ -329,11 +357,12 @@ function extractClaudeTurns(records: JsonlRecord[]): Turn[] {
       if (message) absorbClaudeToolResult(j, toolIndex); // 先把工具结果回填到对应卡片
       const userText = userTextFromRecord(j, "claude");
       if (userText === null) continue; // tool_result 承载 / 空内容：不开新 turn
-      const userImages = imagesFromContent(message?.["content"], "claude");
+      const presentation = presentationFromContent(message?.["content"], "claude");
       current = {
         index: turns.length + 1,
         userText,
-        ...(userImages.length > 0 ? { userImages } : {}),
+        ...(presentation.displayText !== undefined ? { userDisplayText: presentation.displayText } : {}),
+        ...(presentation.images.length > 0 ? { userImages: presentation.images } : {}),
         assistant: [],
         timestamp: recordTimestamp(j),
       };
@@ -434,11 +463,12 @@ function extractCodexTurns(records: JsonlRecord[]): Turn[] {
       if (role === "user") {
         const userText = userTextFromRecord(j, "codex");
         if (userText === null) continue;
-        const userImages = imagesFromContent(payload["content"], "codex");
+        const presentation = presentationFromContent(payload["content"], "codex");
         current = {
           index: turns.length + 1,
           userText,
-          ...(userImages.length > 0 ? { userImages } : {}),
+          ...(presentation.displayText !== undefined ? { userDisplayText: presentation.displayText } : {}),
+          ...(presentation.images.length > 0 ? { userImages: presentation.images } : {}),
           assistant: [],
           timestamp: recordTimestamp(j),
         };

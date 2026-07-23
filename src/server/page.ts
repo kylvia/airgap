@@ -825,8 +825,8 @@ async function performExport(action, format, acceptRisk) {
   const risky = detail.turns.filter((t) => selected.has(t.index) && t.findings > 0);
   // 脱敏后导出是安全的，无需确认；仅「原样导出且命中」时才二次确认。
   if (!redact && risky.length && !acceptRisk && !confirm(msg("share.page.confirmRisk", { turns: risky.map((t) => t.index).join(LOCALE === "zh-CN" ? "、" : ", ") }))) return;
-  // 前端确认通过（或显式重试）即声明接受风险；服务端仍独立复扫兜底。
-  const accept = !!acceptRisk || risky.length > 0;
+  // 只有原样导出的文本风险可由上面的确认隐式接受；图片等服务端风险必须走 409 后的显式重试。
+  const accept = !!acceptRisk || (!redact && risky.length > 0);
   const turns = [...selected].sort((a, b) => a - b);
   setStatus(redact ? msg("share.page.redacting") : msg("share.page.processing"));
   const body = JSON.stringify({ sessionId: detail.id, turns, format, action, redact, acceptRisk: accept, tools: $("tools").value });

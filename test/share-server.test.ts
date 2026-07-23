@@ -362,6 +362,11 @@ describe("renderPage desktop surface", () => {
     expect(exportHandler).toContain("return performExport(action, format, true)");
   });
 
+  it("does not treat redaction as acceptance of unscannable image risk", () => {
+    const exportHandler = page.slice(page.indexOf("async function performExport"), page.indexOf("for (const btn"));
+    expect(exportHandler).toContain("const accept = !!acceptRisk || (!redact && risky.length > 0)");
+  });
+
   it("uses generic desktop settings failures instead of server paths", () => {
     expect(page).toContain('function desktopSettingsError() { return msg("share.desktop.settingsSaveFailed"); }');
     expect(page).toContain('SURFACE === "desktop" ? desktopSettingsError() : res.message');

@@ -174,6 +174,8 @@ export interface UserImage {
 export interface Turn {
   index: number; // 1-based
   userText: string;
+  /** Rich-preview text with successfully embedded image placeholders removed by the parser. */
+  userDisplayText?: string;
   userImages?: UserImage[];
   assistant: TurnBlock[];
   timestamp: string | null;

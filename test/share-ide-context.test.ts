@@ -33,4 +33,13 @@ describe("share IDE 上下文展示", () => {
   it("不是 IDE 注入格式的用户消息原样保留", () => {
     expect(shareTurnsForDisplay([turn("普通问题")], "summary")[0]!.userText).toBe("普通问题");
   });
+
+  it("同时裁剪富文本展示字段里的 IDE 注入上下文", () => {
+    const source: Turn = { ...turn(), userDisplayText: ideInjectedRequest };
+
+    const shown = shareTurnsForDisplay([source], "summary");
+
+    expect(shown[0]!.userDisplayText).toBe("继续做");
+    expect(source.userDisplayText).toBe(ideInjectedRequest);
+  });
 });

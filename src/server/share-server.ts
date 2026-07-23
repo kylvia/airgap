@@ -154,7 +154,14 @@ export function shareTurnsForDisplay(turns: Turn[], tools: ToolDisplay): Turn[] 
   if (tools === "full") return turns;
   return turns.map((turn) => {
     const userText = stripIdeContext(turn.userText);
-    return userText === turn.userText ? turn : { ...turn, userText };
+    const userDisplayText = turn.userDisplayText === undefined ? undefined : stripIdeContext(turn.userDisplayText);
+    return userText === turn.userText && userDisplayText === turn.userDisplayText
+      ? turn
+      : {
+          ...turn,
+          userText,
+          ...(userDisplayText !== undefined ? { userDisplayText } : {}),
+        };
   });
 }
 

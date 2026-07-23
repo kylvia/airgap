@@ -126,6 +126,7 @@ describe("renderHtml", () => {
     const imageTurn: Turn = {
       index: 1,
       userText: "查看截图\n[图片]",
+      userDisplayText: "查看截图",
       userImages: [{ mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" }],
       assistant: [],
       timestamp: null,
@@ -141,6 +142,7 @@ describe("renderHtml", () => {
     const imageHtml = renderHtml([{
       index: 1,
       userText: "[图片]",
+      userDisplayText: "",
       userImages: [{ mediaType: "image/jpeg", dataUrl: "data:image/jpeg;base64,QUJDRA==" }],
       assistant: [],
       timestamp: null,
@@ -148,6 +150,20 @@ describe("renderHtml", () => {
     expect(imageHtml).toContain('class="user-attachments"');
     expect(imageHtml).not.toContain(">[图片]<");
     expect(imageHtml).not.toContain('class="user-text"');
+  });
+
+  it("保留用户亲自输入的图片标记，只隐藏解析器生成的占位符", () => {
+    const imageHtml = renderHtml([{
+      index: 1,
+      userText: "[图片]\n这行是用户正文\n[图片]",
+      userDisplayText: "[图片]\n这行是用户正文",
+      userImages: [{ mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" }],
+      assistant: [],
+      timestamp: null,
+    }], meta);
+
+    expect(imageHtml).toContain("[图片]<br>这行是用户正文");
+    expect(imageHtml).toContain('class="user-attachment"');
   });
 
   it("渲染层拒绝手工注入的远程用户图片", () => {

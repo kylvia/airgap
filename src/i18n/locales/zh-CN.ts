@@ -146,6 +146,7 @@ export const zhCN = {
   "render.tool.completed": "完成",
   "share.api.exportRisk": "选中内容含 {count} 处疑似密钥（{brief}{more}）；确认无误可接受风险重新导出，或先启用脱敏。",
   "share.api.exportRisk.one": "选中内容含 {count} 处疑似密钥（{brief}{more}）；确认无误可接受风险重新导出，或先启用脱敏。",
+  "share.api.imageRisk": "选中内容包含图片。Airgap 无法检查或隐藏图片中的密钥，请人工确认图片安全后再继续。",
   "share.api.more": " 等",
   "share.api.noSelection": "没有选中任何轮次",
   "share.api.redactedNote": "（已脱敏 {count} 处疑似密钥）",

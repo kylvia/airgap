@@ -98,10 +98,12 @@ describe("extractTurns · inline user images", () => {
 
     expect(turns).toHaveLength(2);
     expect(turns[0]!.userText).toBe("看这张图\n[图片]");
+    expect(turns[0]!.userDisplayText).toBe("看这张图");
     expect(turns[0]!.userImages).toEqual([
       { mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" },
     ]);
     expect(turns[1]!.userText).toBe("[图片]");
+    expect(turns[1]!.userDisplayText).toBe("");
     expect(turns[1]!.userImages?.[0]?.mediaType).toBe("image/jpeg");
   });
 
@@ -130,8 +132,10 @@ describe("extractTurns · inline user images", () => {
 
     expect(turns).toHaveLength(2);
     expect(turns[0]!.userText).toBe("解释截图\n[图片]");
+    expect(turns[0]!.userDisplayText).toBe("解释截图");
     expect(turns[0]!.userImages?.[0]?.dataUrl).toBe("data:image/webp;base64,QUJDRA==");
     expect(turns[1]!.userText).toBe("[图片]");
+    expect(turns[1]!.userDisplayText).toBe("");
     expect(turns[1]!.userImages?.[0]?.mediaType).toBe("image/gif");
   });
 
@@ -163,9 +167,29 @@ describe("extractTurns · inline user images", () => {
     ], "codex");
 
     expect(claudeTurns[0]!.userText).toBe("[图片]\n[图片]");
+    expect(claudeTurns[0]!.userDisplayText).toBe("[图片]\n[图片]");
     expect(claudeTurns[0]!.userImages).toBeUndefined();
     expect(codexTurns[0]!.userText).toBe("[图片]\n[图片]");
+    expect(codexTurns[0]!.userDisplayText).toBe("[图片]\n[图片]");
     expect(codexTurns[0]!.userImages).toBeUndefined();
+  });
+
+  it("distinguishes a literal image marker from a generated marker", () => {
+    const turns = extractTurns([
+      record({
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "[图片]\n这行是用户正文" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJDRA==" } },
+          ],
+        },
+      }),
+    ], "claude");
+
+    expect(turns[0]!.userText).toBe("[图片]\n这行是用户正文\n[图片]");
+    expect(turns[0]!.userDisplayText).toBe("[图片]\n这行是用户正文");
   });
 });
 
