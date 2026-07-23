@@ -1,4 +1,4 @@
-import type { JsonlRecord, SessionSource, Turn, TurnBlock } from "../types.js";
+import type { JsonlRecord, SessionSource, Turn, TurnBlock, UserImage } from "../types.js";
 import { isCodexScaffold } from "../util/codex.js";
 
 /** tool_use 折叠为一行时 input 摘要的最大长度（字符） */
@@ -163,6 +163,49 @@ function recordTimestamp(j: Record<string, unknown>): string | null {
   return typeof ts === "string" ? ts : null;
 }
 
+const INLINE_IMAGE_MEDIA_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+
+function parseInlineImageDataUrl(value: unknown): UserImage | null {
+  if (typeof value !== "string") return null;
+  const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/i.exec(value);
+  if (!match || !match[1] || !match[2] || match[2].length % 4 !== 0) return null;
+  const mediaType = match[1].toLowerCase();
+  if (!INLINE_IMAGE_MEDIA_TYPES.has(mediaType)) return null;
+  return { mediaType: mediaType as UserImage["mediaType"], dataUrl: value };
+}
+
+function claudeImage(block: Record<string, unknown>): UserImage | null {
+  if (block["type"] !== "image") return null;
+  const source = asRecord(block["source"]);
+  if (!source || source["type"] !== "base64") return null;
+  const mediaType = source["media_type"];
+  const data = source["data"];
+  return typeof mediaType === "string" && typeof data === "string"
+    ? parseInlineImageDataUrl(`data:${mediaType};base64,${data}`)
+    : null;
+}
+
+function imagesFromContent(content: unknown, source: SessionSource): UserImage[] {
+  if (!Array.isArray(content)) return [];
+  const images: UserImage[] = [];
+  for (const item of content) {
+    const block = asRecord(item);
+    if (!block) continue;
+    const image = source === "claude"
+      ? claudeImage(block)
+      : block["type"] === "input_image"
+        ? parseInlineImageDataUrl(block["image_url"])
+        : null;
+    if (image) images.push(image);
+  }
+  return images;
+}
+
 // ---------- Claude ----------
 
 /**
@@ -286,7 +329,14 @@ function extractClaudeTurns(records: JsonlRecord[]): Turn[] {
       if (message) absorbClaudeToolResult(j, toolIndex); // 先把工具结果回填到对应卡片
       const userText = userTextFromRecord(j, "claude");
       if (userText === null) continue; // tool_result 承载 / 空内容：不开新 turn
-      current = { index: turns.length + 1, userText, assistant: [], timestamp: recordTimestamp(j) };
+      const userImages = imagesFromContent(message?.["content"], "claude");
+      current = {
+        index: turns.length + 1,
+        userText,
+        ...(userImages.length > 0 ? { userImages } : {}),
+        assistant: [],
+        timestamp: recordTimestamp(j),
+      };
       turns.push(current);
     } else if (type === "assistant") {
       if (!current) continue;
@@ -316,6 +366,26 @@ function codexMessageText(content: unknown): string {
   return parts.join("\n").trim();
 }
 
+function codexUserText(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  const parts: string[] = [];
+  for (const item of content) {
+    const block = asRecord(item);
+    if (!block) continue;
+    if (
+      (block["type"] === "input_text" || block["type"] === "text")
+      && typeof block["text"] === "string"
+      && block["text"].trim()
+    ) {
+      parts.push(block["text"].trim());
+    } else if (block["type"] === "input_image") {
+      parts.push("[图片]");
+    }
+  }
+  const text = parts.join("\n").trim();
+  return text.length > 0 ? text : null;
+}
+
 /** Extract visible user text from one source-specific record, or null for scaffolding/noise. */
 export function userTextFromRecord(j: Record<string, unknown>, source: SessionSource): string | null {
   if (source === "claude") {
@@ -328,7 +398,7 @@ export function userTextFromRecord(j: Record<string, unknown>, source: SessionSo
   if (j["type"] !== "response_item") return null;
   const payload = asRecord(j["payload"]);
   if (!payload || payload["type"] !== "message" || payload["role"] !== "user") return null;
-  const text = codexMessageText(payload["content"]);
+  const text = codexUserText(payload["content"]);
   return text && !isCodexScaffold(text) ? text : null;
 }
 
@@ -364,7 +434,14 @@ function extractCodexTurns(records: JsonlRecord[]): Turn[] {
       if (role === "user") {
         const userText = userTextFromRecord(j, "codex");
         if (userText === null) continue;
-        current = { index: turns.length + 1, userText, assistant: [], timestamp: recordTimestamp(j) };
+        const userImages = imagesFromContent(payload["content"], "codex");
+        current = {
+          index: turns.length + 1,
+          userText,
+          ...(userImages.length > 0 ? { userImages } : {}),
+          assistant: [],
+          timestamp: recordTimestamp(j),
+        };
         turns.push(current);
       } else if (role === "assistant") {
         if (current && text) current.assistant.push({ kind: "text", text });

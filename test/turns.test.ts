@@ -16,6 +16,10 @@ function loadFixture(name: string): JsonlRecord[] {
     .map((line, i) => ({ raw: line, lineNo: i + 1, json: tryParse(line) }));
 }
 
+function record(json: Record<string, unknown>): JsonlRecord {
+  return { raw: JSON.stringify(json), lineNo: 1, json };
+}
+
 describe("userTextFromRecord", () => {
   it("extracts a real Claude user message and rejects metadata/tool carriers", () => {
     expect(
@@ -64,6 +68,104 @@ describe("userTextFromRecord", () => {
         "codex",
       ),
     ).toBeNull();
+  });
+});
+
+describe("extractTurns · inline user images", () => {
+  it("keeps Claude embedded images on text and image-only turns", () => {
+    const turns = extractTurns([
+      record({
+        type: "user",
+        timestamp: "2026-07-23T01:00:00.000Z",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "看这张图" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJDRA==" } },
+          ],
+        },
+      }),
+      record({
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "QUJDRA==" } },
+          ],
+        },
+      }),
+    ], "claude");
+
+    expect(turns).toHaveLength(2);
+    expect(turns[0]!.userText).toBe("看这张图\n[图片]");
+    expect(turns[0]!.userImages).toEqual([
+      { mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" },
+    ]);
+    expect(turns[1]!.userText).toBe("[图片]");
+    expect(turns[1]!.userImages?.[0]?.mediaType).toBe("image/jpeg");
+  });
+
+  it("keeps Codex data images and opens image-only turns", () => {
+    const turns = extractTurns([
+      record({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_text", text: "解释截图" },
+            { type: "input_image", image_url: "data:image/webp;base64,QUJDRA==", detail: "auto" },
+          ],
+        },
+      }),
+      record({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_image", image_url: "data:image/gif;base64,QUJDRA==" }],
+        },
+      }),
+    ], "codex");
+
+    expect(turns).toHaveLength(2);
+    expect(turns[0]!.userText).toBe("解释截图\n[图片]");
+    expect(turns[0]!.userImages?.[0]?.dataUrl).toBe("data:image/webp;base64,QUJDRA==");
+    expect(turns[1]!.userText).toBe("[图片]");
+    expect(turns[1]!.userImages?.[0]?.mediaType).toBe("image/gif");
+  });
+
+  it("keeps placeholders but rejects unsafe or unavailable image sources", () => {
+    const claudeTurns = extractTurns([
+      record({
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/svg+xml", data: "PHN2Zz4=" } },
+            { type: "image", file: { path: "/tmp/private.png" } },
+          ],
+        },
+      }),
+    ], "claude");
+    const codexTurns = extractTurns([
+      record({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            { type: "input_image", image_url: "https://example.com/private.png" },
+            { type: "input_image", image_url: "data:image/png;base64,not base64" },
+          ],
+        },
+      }),
+    ], "codex");
+
+    expect(claudeTurns[0]!.userText).toBe("[图片]\n[图片]");
+    expect(claudeTurns[0]!.userImages).toBeUndefined();
+    expect(codexTurns[0]!.userText).toBe("[图片]\n[图片]");
+    expect(codexTurns[0]!.userImages).toBeUndefined();
   });
 });
 

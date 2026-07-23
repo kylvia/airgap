@@ -164,9 +164,17 @@ export interface TurnBlock {
   toolError?: boolean;
 }
 
+export type InlineImageMediaType = "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+
+export interface UserImage {
+  mediaType: InlineImageMediaType;
+  dataUrl: string;
+}
+
 export interface Turn {
   index: number; // 1-based
   userText: string;
+  userImages?: UserImage[];
   assistant: TurnBlock[];
   timestamp: string | null;
 }
