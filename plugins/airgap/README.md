@@ -1,5 +1,7 @@
 # airgap assistant plugin
 
+English · [简体中文](./README.zh-CN.md)
+
 This local-checkout plugin opens airgap's share picker from Claude Code or Codex without making you copy a second command into a terminal. The same package also provides Claude commands for scan / pack / rescue and a PreCompact rescue hook.
 
 ## Prepare the local CLI

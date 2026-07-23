@@ -33,7 +33,7 @@ npm install -g airgap
 
 ### 桌面端状态
 
-仓库里已有面向非终端用户的 **Apple Silicon macOS Share 开发者预览**，可从源码运行；它还不是可公开下载的签名、公证安装包，也暂未启用桌面自动更新。普通用户目前仍应使用上面的 npm CLI。开发和验证方式见 [Airgap Desktop](./apps/desktop/README.md)。
+仓库里已有面向非终端用户的 **Apple Silicon macOS Share 开发者预览**，可从源码运行；它还不是可公开下载的签名、公证安装包，也暂未启用桌面自动更新。普通用户目前仍应使用上面的 npm CLI。开发和验证方式见 [Airgap Desktop](./apps/desktop/README.zh-CN.md)。
 
 当前格式支持：
 
@@ -131,7 +131,7 @@ npx airgap share
 
 Share 支持英文和简体中文，默认跟随系统语言。可用 `--lang` 或 `AIRGAP_LANG` 临时覆盖，也可以从设置面板持久化选择。运行 `airgap doctor` 可查看检测语言和最终语言。
 
-安装[本地助手插件](./plugins/airgap/README.md)后，在 AI 编码对话里也能一步唤起：
+安装[本地助手插件](./plugins/airgap/README.zh-CN.md)后，在 AI 编码对话里也能一步唤起：
 
 - Claude Code：`/airgap:share`
 - Codex：`$airgap-share`
