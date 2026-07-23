@@ -4,7 +4,7 @@
 
 Branch: `feat/desktop-share-mvp`
 
-The current phase is open-source documentation readiness: make the published trust boundary, contributor path, project instructions, technical contracts, and subproject documentation consistent before broader promotion.
+The open-source documentation-readiness pass is implemented and locally verified. The branch is ready for review before broader promotion.
 
 ## Verified baseline
 
@@ -13,15 +13,16 @@ The current phase is open-source documentation readiness: make the published tru
 - Airgap Desktop remains an Apple Silicon macOS developer preview; it is not a signed or notarized public download.
 - The assistant plugin is distributed for installation from a trusted local checkout and provides Claude Code commands, a Codex skill, and a Claude PreCompact rescue hook.
 - GitHub private vulnerability reporting is enabled for `kylvia/airgap`.
-
-Fresh full-project tests for this documentation pass are pending until all planned documentation changes are complete.
+- Verification on 2026-07-23: `npm run typecheck` clean; `npm test` 471 passed / 2 skipped; `npm run build` succeeded.
+- `npm pack --dry-run --json` contains `LICENSE`, both root READMEs, `dist/index.js`, and `package.json`.
 
 ## Current work
 
 - `AGENTS.md` is the shared project-instruction source; `CLAUDE.md` points to it.
 - `SECURITY.md` and `CONTRIBUTING.md` provide public security and contributor entry points.
-- Root and subproject READMEs are being aligned with the published CLI, language, runtime, and network boundaries.
-- Technical and launch documents are being stripped of stale agent assignments, placeholders, and unsupported compatibility claims.
+- Root and subproject READMEs now match the published CLI, language, runtime, and network boundaries.
+- Technical and launch documents no longer contain stale agent assignments, launch placeholders, or unsupported compatibility claims.
+- The remaining action is review of the documentation-only commits on this branch.
 
 ## Live risks
 
@@ -41,7 +42,7 @@ Fresh full-project tests for this documentation pass are pending until all plann
 
 ## Next verification
 
-After the documentation pass:
+After any follow-up change:
 
 ```sh
 npm run typecheck

@@ -217,9 +217,13 @@ describe("quick-launch documentation", () => {
       expect(readme).toContain("/airgap:share");
       expect(readme).toContain("$airgap-share");
       expect(readme).toContain("alias ags='airgap share'");
-      expect(readme).toContain("npm run build && npm link");
       expect(readme).toContain("loopback");
     }
+    expect(englishShare).toContain("npx airgap share");
+    expect(chineseShare).toContain("npx airgap share");
+    expect(englishShare).not.toContain("npm run build && npm link");
+    expect(chineseShare).not.toContain("npm run build && npm link");
+    expect(pluginReadme).toContain("npm run build && npm link");
     expect(englishShare).toContain("Done");
     expect(chineseShare).toContain("完成关闭");
     expect(pluginReadme).toMatch(/Done[\s\S]*完成关闭/);
@@ -232,8 +236,6 @@ describe("quick-launch documentation", () => {
     expect(pluginReadme).toMatch(/Raycast[\s\S]*Alfred[\s\S]*macOS Shortcuts/);
     expect(pluginReadme).toContain("ten minutes of inactivity");
     expect(pluginReadme).toContain("airgap itself does not stay resident");
-    expect(englishShare).not.toContain("npx airgap share");
-    expect(chineseShare).not.toContain("npx airgap share");
   });
 
   it("documents local plugin installation and preserves rescue and uninstall guidance", async () => {
