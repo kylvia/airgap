@@ -105,6 +105,12 @@ export const CHAT_CSS = `${THEME_CSS}
     border-radius: var(--radius-card); padding: 12px 16px; max-width: 82%;
     font-size: 14.5px; word-break: break-word;
   }
+  .msg-user .user-text + .user-attachments { margin-top: 10px; }
+  .msg-user .user-attachments { display: grid; gap: 8px; }
+  .msg-user .user-attachment {
+    display: block; max-width: 100%; height: auto;
+    border-radius: var(--radius-input);
+  }
   .msg-user .bubble::before {
     content: ""; position: absolute; top: 13px; right: -1px; width: 2px; height: 18px;
     background: var(--accent); border-radius: 2px;
@@ -307,6 +313,38 @@ function renderToolBlock(block: TurnBlock, tools: ToolDisplay, i18n: I18n): stri
   return renderToolCard(block, kind, i18n);
 }
 
+function renderUserContent(turn: Turn, i18n: I18n): string {
+  const images = (turn.userImages ?? []).filter((image) => {
+    const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/i.exec(image.dataUrl);
+    return Boolean(
+      match
+      && match[1]?.toLowerCase() === image.mediaType
+      && match[2]
+      && match[2].length % 4 === 0,
+    );
+  });
+  let resolved = images.length;
+  const visibleText = turn.userText
+    .split("\n")
+    .filter((line) => {
+      if (resolved > 0 && line.trim() === "[图片]") {
+        resolved -= 1;
+        return false;
+      }
+      return true;
+    })
+    .join("\n")
+    .trim();
+  const text = visibleText
+    ? `<div class="user-text">${escapeHtml(visibleText).replace(/\n/g, "<br>")}</div>`
+    : "";
+  const imageHtml = images
+    .map((image) => `<img class="user-attachment" src="${escapeHtml(image.dataUrl)}" alt="${escapeHtml(i18n.t("share.tag.image"))}">`)
+    .join("");
+  const attachments = imageHtml ? `<div class="user-attachments">${imageHtml}</div>` : "";
+  return `${text}${attachments}`;
+}
+
 /** 单轮聊天片段：轮次标记 + 用户纸条 + AI 纸面卡片。工具块按 opts.tools 级别渲染。供预览面板逐轮拼装复用。 */
 export function renderTurnBlock(turn: Turn, opts?: RenderOptions): string {
   const tools = opts?.tools ?? DEFAULT_TOOL_DISPLAY;
@@ -314,7 +352,7 @@ export function renderTurnBlock(turn: Turn, opts?: RenderOptions): string {
   const out: string[] = [];
   out.push(`  <div class="turn-label">—— ${i18n.t("render.turn", { index: turn.index })} ——</div>`);
   out.push(
-    `  <div class="msg-user"><div class="bubble">${escapeHtml(turn.userText).replace(/\n/g, "<br>")}</div></div>`,
+    `  <div class="msg-user"><div class="bubble">${renderUserContent(turn, i18n)}</div></div>`,
   );
   const inner: string[] = [];
   for (const block of turn.assistant) {

@@ -8,7 +8,10 @@ const meta = { title: "demo 会话片段", date: "2026-07-01" };
 const turns: Turn[] = [
   {
     index: 1,
-    userText: '帮我看看 <script>alert("x")</script> 这段',
+    userText: '帮我看看 <script>alert("x")</script> 这段\n[图片]',
+    userImages: [
+      { mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" },
+    ],
     assistant: [
       { kind: "thinking", text: "先判断是不是 XSS 演示。" },
       {
@@ -78,6 +81,12 @@ describe("renderMarkdown", () => {
     expect(none).toContain("> 💭 先判断是不是 XSS 演示。");
     expect(none).toContain("## 结论");
   });
+
+  it("不把图片二进制写进 Markdown 导出", () => {
+    expect(md).toContain("[图片]");
+    expect(md).not.toContain("data:image/");
+    expect(md).not.toContain("QUJDRA==");
+  });
 });
 
 describe("renderHtml", () => {
@@ -111,6 +120,47 @@ describe("renderHtml", () => {
     expect(html).toContain("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;");
     expect(html).not.toContain('<script>alert("x")');
     expect(html).toContain("多行<br>用户输入");
+  });
+
+  it("展示已解析的用户原图并隐藏对应占位符", () => {
+    const imageTurn: Turn = {
+      index: 1,
+      userText: "查看截图\n[图片]",
+      userImages: [{ mediaType: "image/png", dataUrl: "data:image/png;base64,QUJDRA==" }],
+      assistant: [],
+      timestamp: null,
+    };
+    const imageHtml = renderHtml([imageTurn], meta);
+    expect(imageHtml).toContain('class="user-attachment"');
+    expect(imageHtml).toContain('src="data:image/png;base64,QUJDRA=="');
+    expect(imageHtml).toContain("查看截图");
+    expect(imageHtml).not.toContain("[图片]");
+  });
+
+  it("纯图片轮次不渲染空文本节点", () => {
+    const imageHtml = renderHtml([{
+      index: 1,
+      userText: "[图片]",
+      userImages: [{ mediaType: "image/jpeg", dataUrl: "data:image/jpeg;base64,QUJDRA==" }],
+      assistant: [],
+      timestamp: null,
+    }], meta);
+    expect(imageHtml).toContain('class="user-attachments"');
+    expect(imageHtml).not.toContain(">[图片]<");
+    expect(imageHtml).not.toContain('class="user-text"');
+  });
+
+  it("渲染层拒绝手工注入的远程用户图片", () => {
+    const imageHtml = renderHtml([{
+      index: 1,
+      userText: "[图片]",
+      userImages: [{ mediaType: "image/png", dataUrl: "https://evil.example/private.png" }],
+      assistant: [],
+      timestamp: null,
+    }], meta);
+    expect(imageHtml).not.toContain("evil.example");
+    expect(imageHtml).not.toContain('class="user-attachment"');
+    expect(imageHtml).toContain("[图片]");
   });
 
   it("thinking 折叠进 details，工具默认渲染成一行摘要（summary 档）", () => {
