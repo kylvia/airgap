@@ -1,27 +1,25 @@
-name: Canary (claude-code drift sentinel)
+name: Canary (version sentinel + synthetic pipeline)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WHY THIS EXISTS
 #
 # airgap reads and rewrites on-disk claude-code session files (~/.claude). Those
-# formats are undocumented and can shift on any claude release. Competitors ship
-# against a single frozen snapshot of the format; airgap instead watches the
-# *latest* claude-code every day and re-runs its own pack/open pipeline against a
-# synthetic session.
+# formats are undocumented and can shift on any claude release. This workflow
+# records the latest claude-code version every day and re-runs airgap's own
+# pack/open pipeline against a synthetic session.
 #
 # WHAT A RED "canary" JOB MEANS
-#   The newest @anthropic-ai/claude-code has (or coincides with) a change that
-#   breaks airgap's own pipeline OR signals possible session-format drift.
-#   ACTION: a human must manually re-check `airgap open` load compatibility
-#   against the new claude version — inspect ~/.claude/projects/<munged>/*.jsonl
-#   for structural changes (new record types, moved fields, changed munge rule,
-#   sidecar layout) and update src/slice.ts / src/commands/open.ts as needed.
+#   airgap's synthetic pipeline, dependency installation, or version-observation
+#   step failed. The failure does not by itself prove a claude-code format change.
+#   ACTION: inspect the failed step. When a new claude-code version was observed,
+#   a human must separately check real `airgap open` load/resume compatibility and
+#   inspect ~/.claude/projects/<munged>/*.jsonl for structural changes.
 #
 # NOTE: this workflow deliberately does NOT run `claude --resume` (that needs a
 # paid, logged-in account). It installs claude-code only to (a) capture the
-# current version number as a drift signal and (b) fail loudly when a new
-# version lands, prompting the manual compatibility check. All correctness
-# assertions run against airgap's own pack/open pipeline.
+# current version number as a sentinel and (b) give maintainers a version to
+# examine manually. All correctness assertions run against airgap's own
+# synthetic fixture and pack/open pipeline.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -39,7 +37,7 @@ concurrency:
 
 jobs:
   canary:
-    name: airgap pipeline vs latest claude-code
+    name: latest version sentinel + synthetic airgap pipeline
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -70,14 +68,14 @@ jobs:
           {
             echo "### Canary run"
             echo ""
-            echo "- claude-code under test: \`$VERSION\`"
-            echo "- npm dist-tag \`@latest\` of \`@anthropic-ai/claude-code\`"
+            echo "- latest claude-code version observed: \`$VERSION\`"
+            echo "- format exercised by airgap: repository synthetic fixture"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # The e2e drives airgap's OWN pack/open pipeline against a synthetic
-      # claude session. A failure here = likely session-format drift → do the
-      # manual `airgap open` compatibility check described in the header above.
-      - name: Run canary e2e (airgap pipeline smoke)
+      # This exercises airgap's own pack/open pipeline against a synthetic
+      # Claude session. It does not create or resume a session with the installed
+      # latest claude-code.
+      - name: Run synthetic airgap pack/open regression
         run: bash scripts/canary-e2e.sh
         env:
           AIRGAP_ENTRY: ${{ github.workspace }}/dist/index.js
@@ -86,12 +84,11 @@ jobs:
         if: always()
         run: |
           if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ airgap pipeline is compatible with claude-code ${{ steps.claude.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "✅ Synthetic airgap pack/open regression passed; latest claude-code observed: \`${{ steps.claude.outputs.version }}\`. Real format compatibility was not exercised." >> "$GITHUB_STEP_SUMMARY"
           else
             {
-              echo "🔴 **Canary RED** — airgap pipeline failed against claude-code \`${{ steps.claude.outputs.version }}\`."
+              echo "🔴 **Canary RED** — the version sentinel or synthetic airgap pipeline failed while claude-code \`${{ steps.claude.outputs.version }}\` was observed."
               echo ""
-              echo "A new claude-code release may have changed the on-disk session format."
-              echo "Manually re-check \`airgap open\` load compatibility before shipping."
+              echo "Inspect the failed step. If this run observed a new claude-code release, manually check real \`airgap open\` load/resume compatibility before shipping."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
