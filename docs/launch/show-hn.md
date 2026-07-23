@@ -38,6 +38,7 @@ npx airgap scan
 ### Limitations (being upfront)
 
 - **Redaction is best-effort detection, not a guarantee.** It catches known prefixes and shapes; novel or oddly-formatted secrets can slip through. There's defense-in-depth (replace longest-secret-first, re-scan after redaction, fail-closed and refuse to write the pack if anything still matches, `open` re-scans independently before loading), and I ran an adversarial security review that fixed 14 issues (sidecar redaction, whole-PEM handling, non-brute-forceable placeholders, independent re-scan on open). It reduces your exposure; it does not eliminate it. Review before you send.
+- **Image pixels are not scanned or redacted.** HTML/PNG export preserves supported embedded user images only after a separate manual-risk confirmation; Markdown omits the image bytes.
 - **Version-drift risk.** The Claude JSONL layout is reverse-engineered against 2.1.197/198. If the on-disk format changes, slicing/resume can break until airgap catches up. `airgap doctor` prints the local claude/codex versions to help spot drift.
 
 Repo: https://github.com/kylvia/airgap (MIT). Feedback is especially useful on the redaction rules and on `open`/resume behavior across Claude Code versions, since that path is most exposed to undocumented format drift.

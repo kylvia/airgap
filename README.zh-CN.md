@@ -150,6 +150,8 @@ npx airgap show --md --out clip.md
 
 show 把选中的轮次渲染成聊天气泡样式，可出 **Markdown**、**单文件 HTML** 或**长图 PNG**（PNG 需要本机装了 Chrome/Chromium）。它会先对选中内容跑一遍同样的密钥扫描，只要还带命中就要你确认，才让你导出。
 
+HTML/PNG 会保留用户消息里内嵌的原图，但 airgap 无法检查或脱敏图片像素里的密钥，因此含图导出还需要单独人工确认。非交互环境中，请先检查图片，再用 `--yes` 明确接受风险。Markdown 不携带图片字节，只保留 `[图片]` 占位符。
+
 ## 版本更新提示
 
 在交互式终端中，airgap 通常每 24 小时最多向 npm 官方 Registry（`registry.npmjs.org`）检查一次新版本；如果多个进程同时启动，它们可能在共享缓存更新前各检查一次。请求只包含常规 HTTPS 元数据和当前 airgap 版本，不会携带会话内容、项目名、文件路径或配置值。检查失败会静默跳过，airgap 也绝不会自动安装更新。
@@ -189,6 +191,7 @@ export AIRGAP_NO_UPDATE_CHECK=1
 - **命中分置信度。** 高置信度规则盯的是真实的凭据前缀（`sk-ant-`、`ghp_`、`AKIA…`、`AIza…`、`sk-proj-`、PEM 块……），这些是该立刻处理的。宽启发式规则（`generic-assignment`、`env-dump`、`bearer-token`、`jwt`）抓的是**疑似**内容、含假阳性——把它们当"这里看一眼"，别当"这是一把活密钥"。
 - **包既不加密，也不认证来源。** 拿到包的人都能读取内容。manifest 哈希只能发现已声明条目的变化或损坏；由于 manifest 没有签名，它不能证明发送者身份，也不能阻止别人同时修改内容和哈希。
 - **open 在安装前独立扫描。** 它不依赖 manifest 的脱敏自述；只要声明的内容仍命中密钥规则，就默认拒绝安装，除非你加 `--accept-risk`。
+- **图片内容不会被扫描或脱敏。** HTML/PNG 只在单独人工确认风险后保留支持的用户内嵌图片；`--redact` 只处理文字，不处理像素。Markdown 不携带图片字节。
 - **续接兼容性与版本有关。** 装进 `~/.claude` + resume 的路径对着 **claude 2.1.197/198** 验过。Claude Code 的落盘格式可能漂移；将来某个版本要是 resume 不了装进去的包，用 open 打印出来的兜底命令 `claude --resume <绝对路径> --fork-session`，并且麻烦提个 issue。
 
 ## 开发与贡献

@@ -27,6 +27,20 @@ interface ShowOpts {
   tools?: string;
 }
 
+type ShowFormat = "md" | "html" | "png";
+export type ShowImageRiskAction = "allow" | "confirm" | "block";
+
+export function showImageRiskAction(
+  turns: Turn[],
+  format: ShowFormat,
+  yes: boolean,
+  interactive: boolean,
+): ShowImageRiskAction {
+  if (format === "md" || !turns.some((turn) => (turn.userImages?.length ?? 0) > 0)) return "allow";
+  if (yes) return "allow";
+  return interactive ? "confirm" : "block";
+}
+
 // ---------- PNG：驱动系统 Chrome，零 npm 依赖 ----------
 
 async function renderPng(html: string, outFile: string): Promise<void> {
@@ -55,7 +69,7 @@ export function registerShow(program: Command): void {
     .option("--out <file>", "output file path")
     .option("--tools <level>", `tool-call display: none | summary | full (default: ${DEFAULT_TOOL_DISPLAY})`)
     .option("--redact", "redact detected secrets (placeholders) before exporting, instead of blocking")
-    .option("--yes", "skip the secret-hit confirmation")
+    .option("--yes", "accept secret/image export risk without prompting")
     .action(async (opts: ShowOpts) => {
       // 0. 校验工具展示级别（渲染时生效；扫描/脱敏始终覆盖全部字段，从宽拦截）
       if (opts.tools !== undefined && !(TOOL_DISPLAYS as readonly string[]).includes(opts.tools)) {
@@ -128,7 +142,32 @@ export function registerShow(program: Command): void {
         selected = turns;
       }
 
-      // 4. 出图前处理密钥：--redact 脱敏后导出（推荐）；否则命中就拦截，--yes 才跳过确认
+      const format: ShowFormat = opts.png ? "png" : opts.md ? "md" : "html";
+
+      // 4. 图片内容不进入文字检测器，也无法自动脱敏。HTML/PNG 嵌入图片字节前必须人工确认。
+      const imageRisk = showImageRiskAction(selected, format, opts.yes === true, process.stdin.isTTY === true);
+      const embedsImages = format !== "md" && selected.some((turn) => (turn.userImages?.length ?? 0) > 0);
+      if (embedsImages) {
+        console.error(pc.yellow("⚠ 选中内容包含图片。airgap 无法检查或隐藏图片中的密钥，请人工确认图片安全后再继续。"));
+        if (imageRisk === "block") {
+          console.error(pc.red("非交互环境无法确认图片内容。请人工检查后用 --yes 接受图片风险，或改用 --md（Markdown 不包含图片字节）。"));
+          process.exitCode = 1;
+          return;
+        }
+        if (imageRisk === "confirm") {
+          const go = await p.confirm({
+            message: "图片内容无法自动扫描或脱敏，确认已人工检查并继续导出吗？",
+            initialValue: false,
+          });
+          if (p.isCancel(go) || !go) {
+            p.cancel("已取消");
+            process.exitCode = 1;
+            return;
+          }
+        }
+      }
+
+      // 5. 处理文字密钥：--redact 脱敏后导出（推荐）；否则命中就拦截，--yes 才跳过确认
       let redactedCount = 0;
       if (opts.redact) {
         // 脱敏（占位符）后再导出：结果由 redactor 的 fail-closed 复扫保证干净
@@ -161,8 +200,7 @@ export function registerShow(program: Command): void {
         }
       }
 
-      // 5. 渲染 + 写出
-      const format: "md" | "html" | "png" = opts.png ? "png" : opts.md ? "md" : "html";
+      // 6. 渲染 + 写出
       const lastTs = selected[selected.length - 1]?.timestamp;
       const meta = {
         title: sessionTitle(records, info),

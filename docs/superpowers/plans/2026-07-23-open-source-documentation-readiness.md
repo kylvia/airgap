@@ -368,7 +368,7 @@ Run:
 npm pack --dry-run --json
 ```
 
-Expected: package `airgap@0.2.1` includes `LICENSE`, both root READMEs, `dist/index.js`, and `package.json`.
+Expected: the version declared by `package.json` includes `LICENSE`, both root READMEs, `dist/index.js`, and `package.json`.
 
 - [ ] **Step 5: Run the full project checks**
 

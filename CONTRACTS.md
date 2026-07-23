@@ -56,16 +56,18 @@ Node ≥22，TS strict。测试用 vitest，放 `test/`，fixtures 放 `test/fix
 ### 渲染与分享栈
 - `src/render/turns.ts`
   - `export function extractTurns(records: JsonlRecord[], source: SessionSource): Turn[]`
-  - Claude：type=user 且 message.content 含用户文本（非 tool_result 承载、非 isMeta）开启新 turn；其后 assistant 记录的 text/thinking/tool_use block 归入该 turn；tool_use 折叠为一行 `工具名: input 摘要（≤80 字符）`
-  - Codex：response_item 线性流，message role=user 开新 turn，输出同理
-- `src/render/markdown.ts` — `export function renderMarkdown(turns: Turn[], meta: { title: string; date: string }): string`
-- `src/render/html.ts` — `export function renderHtml(turns: Turn[], meta): string` — Dossier 单文件 transcript HTML：header、turn blocks、footer；warm bone canvas、paper card、off-black text/hairlines、muted pastel 语义点缀；消息、toolcard、thinking disclosure、code block 都走 flat transcript card/toolcard 样式，靠 1px 边框与 10px radius 建立层级；markdown→html 用 markdown-it（`html:false` 转义 raw HTML、默认 validateLink 拦危险协议、图片仅放行 `data:` URI），GFM 表格/删除线/任务列表/blockquote/嵌套/斜体/hr 全覆盖、默认 XSS-safe 且零外链
+  - Claude：type=user 且 message.content 含用户文本或支持的 base64 图片时开启新 turn；其后 assistant 记录的 text/thinking/tool_use block 归入该 turn；tool_use 折叠为一行 `工具名: input 摘要（≤80 字符）`
+  - Codex：response_item 线性流，message role=user 开新 turn；支持的 `input_image` data URL 同样进入 `Turn.userImages`
+  - 只保留 PNG/JPEG/WebP/GIF 的合法 base64 data URL；远程 URL、文件引用、SVG 和畸形数据只保留文字占位符，不进入 `userImages`
+- `src/render/markdown.ts` — `export function renderMarkdown(turns: Turn[], meta: { title: string; date: string }): string`；保留 `[图片]` 文字占位符，不写图片字节
+- `src/render/html.ts` — `export function renderHtml(turns: Turn[], meta): string` — Dossier 单文件 transcript HTML：header、turn blocks、footer；warm bone canvas、paper card、off-black text/hairlines、muted pastel 语义点缀；消息、内嵌用户图片、toolcard、thinking disclosure、code block 都走 flat transcript card/toolcard 样式，靠 1px 边框与 10px radius 建立层级；markdown→html 用 markdown-it（`html:false` 转义 raw HTML、默认 validateLink 拦危险协议、图片仅放行已验证的 `data:` URI），GFM 表格/删除线/任务列表/blockquote/嵌套/斜体/hr 全覆盖、默认 XSS-safe 且零外链
 - `src/server/page.ts` — `export function renderPage(defaultSession?: string): string` — `airgap share` 本地 picker/share shell：会话选择、左侧 turn list、右侧 iframe preview、warning banner、footer primary/ghost buttons 和 export 控件都归这里；`buildPreviewShell()` 只复用 transcript 外层结构与 `CHAT_CSS`，必须与 `renderHtml()` 的 header/turn/footer 结构保持同步
 - `src/commands/show.ts`
   - `export function registerShow(program: Command): void`
   - `airgap show [--last N] [--turns <list>] [--pick] [--session <prefix>] [--md|--html|--png] [--out <file>] [--tools none|summary|full] [--redact] [--yes]`
   - `--pick`：@clack/prompts multiselect，选项 label=`第N轮 <用户文本前40字>`
   - 默认 `--html`；`--png` 用系统 Chrome + DevTools Protocol 生成，找不到 Chrome 则报错并提示用 --html
+  - HTML/PNG 含 `Turn.userImages` 时先提示图片像素无法扫描/脱敏：交互环境人工确认，非交互环境拒绝；`--yes` 表示明确接受图片风险。Markdown 不含图片字节，不触发图片确认
   - 出图前对选中内容跑 scan；默认阻止非交互导出或要求交互确认，`--redact` 用占位符脱敏，`--yes` 接受未脱敏导出的风险
 - `src/commands/share.ts`
   - `export function registerShare(program: Command): void`
@@ -117,5 +119,6 @@ Node ≥22，TS strict。测试用 vitest，放 `test/`，fixtures 放 `test/fix
 
 - 真实 `~/.claude`、`~/.codex` 数据只允许只读验证，绝不作为 fixture 提交，也不得由测试修改。
 - 检测器、脱敏、切片或 pack/open 改动必须覆盖对应专项测试，并运行 `npm run typecheck`、`npm test`、`npm run build`。
+- 文字检测器和 redactor 不读取图片像素；任何新增的图片导出路径必须复用显式人工风险确认，不能把 `--redact` 解释成图片已脱敏。
 - 格式兼容结论必须记录真实验证过的 Claude Code / Codex 版本；每日 canary 只运行合成 pack/open 回归，不证明最新版落盘格式可续接。
 - 公共命令参数以 `airgap <command> --help` 为准；命令表面变化时同步更新中英文 README、本文和相关插件文档。
