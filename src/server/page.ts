@@ -462,9 +462,9 @@ function fillOptions(sessions, keep) {
   for (const s of sessions) {
     const o = document.createElement("option");
     o.value = s.id;
-    // 桌面用户只看到项目、产品和相对时间；内部 id 仍只作为 option value 使用。
+    // 桌面优先显示会话标题；无标题时回退项目名。内部 id 仍只作为 option value 使用。
     o.textContent = SURFACE === "desktop"
-      ? msg("share.desktop.conversationLabel", { project: s.project, provider: providerName(s.source), time: rel(s.mtimeMs) })
+      ? msg("share.desktop.conversationLabel", { title: s.title || s.project, provider: providerName(s.source), time: rel(s.mtimeMs) })
       : (s.title || s.project + " · " + msg("share.page.fallbackTitle")) + " · " + s.source + " · " + rel(s.mtimeMs);
     sel.appendChild(o);
   }

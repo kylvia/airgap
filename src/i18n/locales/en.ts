@@ -85,7 +85,7 @@ export const en = {
   "share.page.toolSaveFailed": "Could not save the tool display preference",
   "share.page.closed": "Closed. You can close this tab.",
   "share.desktop.title": "Share conversation",
-  "share.desktop.conversationLabel": "{project} · {provider} · {time}",
+  "share.desktop.conversationLabel": "{title} · {provider} · {time}",
   "share.desktop.claudeConversation": "Claude Code conversation",
   "share.desktop.codexConversation": "Codex conversation",
   "share.desktop.recheck": "Recheck",

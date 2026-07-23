@@ -87,7 +87,7 @@ export const zhCN = {
   "share.page.toolSaveFailed": "工具展示偏好保存失败",
   "share.page.closed": "已关闭，可以关掉这个标签页了。",
   "share.desktop.title": "分享对话",
-  "share.desktop.conversationLabel": "{project} · {provider} · {time}",
+  "share.desktop.conversationLabel": "{title} · {provider} · {time}",
   "share.desktop.claudeConversation": "Claude Code 对话",
   "share.desktop.codexConversation": "Codex 对话",
   "share.desktop.recheck": "重新检查",

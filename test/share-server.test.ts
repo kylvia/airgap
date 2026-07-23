@@ -214,9 +214,9 @@ describe("renderPage desktop surface", () => {
     expect(page).not.toContain(">Done</button>");
   });
 
-  it("uses friendly provider labels and keeps tool controls under Advanced", () => {
+  it("uses session titles with project fallback and keeps tool controls under Advanced", () => {
     expect(page).toContain('source === "claude" ? "Claude Code" : "Codex"');
-    expect(page).toContain('msg("share.desktop.conversationLabel", { project: s.project, provider: providerName(s.source), time: rel(s.mtimeMs) })');
+    expect(page).toContain('msg("share.desktop.conversationLabel", { title: s.title || s.project, provider: providerName(s.source), time: rel(s.mtimeMs) })');
     expect(page).toMatch(/<details[^>]*>[\s\S]*<summary>Advanced<\/summary>[\s\S]*id="tools"[\s\S]*<\/details>/);
     expect(page).toContain('msg("share.desktop.role.me")');
     expect(page).toContain('msg("share.desktop.role.assistant")');
