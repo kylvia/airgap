@@ -68,7 +68,7 @@ PROJECT                         SESSIONS   CRITICAL  HIGH  MEDIUM  OLDEST
 ⚠ ~680 of ~1,200 sessions contain plaintext secrets that would leak if shared or synced.
 ```
 
-*（示例输出，数字每台机器都不一样——想看你自己的，跑一下就知道了。）*
+*（示例输出；不同机器的数字不同，统计也包含可能误报的分级启发式命中。请在自己的目录运行，并复核具体命中。）*
 
 想看逐条命中（带掩码预览）：
 
@@ -122,8 +122,7 @@ npx airgap open pack.ccpack --project ~/dst  # 指定装到哪个项目目录
 需要挑选几轮对话、实时预览并导出长图 / HTML / Markdown 时，启动本地选择器：
 
 ```sh
-npm run build && npm link # 在可信本地 checkout 中执行一次
-airgap share
+npx airgap share
 ```
 
 浏览器会自动打开。服务只绑定 loopback（本机回环地址）；点击**完成关闭**或空闲 10 分钟后退出，airgap 自身不常驻。
@@ -191,6 +190,19 @@ export AIRGAP_NO_UPDATE_CHECK=1
 - **包既不加密，也不认证来源。** 拿到包的人都能读取内容。manifest 哈希只能发现已声明条目的变化或损坏；由于 manifest 没有签名，它不能证明发送者身份，也不能阻止别人同时修改内容和哈希。
 - **open 在安装前独立扫描。** 它不依赖 manifest 的脱敏自述；只要声明的内容仍命中密钥规则，就默认拒绝安装，除非你加 `--accept-risk`。
 - **续接兼容性与版本有关。** 装进 `~/.claude` + resume 的路径对着 **claude 2.1.197/198** 验过。Claude Code 的落盘格式可能漂移；将来某个版本要是 resume 不了装进去的包，用 open 打印出来的兜底命令 `claude --resume <绝对路径> --fork-session`，并且麻烦提个 issue。
+
+## 开发与贡献
+
+在可信的本地 checkout 中执行：
+
+```sh
+npm ci
+npm run build
+npm run typecheck
+npm test
+```
+
+改动规范和专项验证见 [CONTRIBUTING.md](./CONTRIBUTING.md)。疑似安全漏洞请按 [SECURITY.md](./SECURITY.md) 私密报告；普通 bug 和功能建议请使用 [GitHub Issues](https://github.com/kylvia/airgap/issues)。
 
 ## 许可证
 

@@ -68,7 +68,7 @@ PROJECT                         SESSIONS   CRITICAL  HIGH  MEDIUM  OLDEST
 ⚠ ~680 of ~1,200 sessions contain plaintext secrets that would leak if shared or synced.
 ```
 
-*(Example output. Numbers vary by machine — run it against your own folders to see yours.)*
+*(Example output. Numbers vary by machine, and the totals include confidence-graded heuristic findings that can be false positives — run it against your own folders and review the matches.)*
 
 Want the raw list of hits with masked previews:
 
@@ -122,8 +122,7 @@ npx airgap open pack.ccpack --project ~/dst  # choose the target project directo
 When you want to select a few turns, preview them, and export a long image / HTML / Markdown, start the picker:
 
 ```sh
-npm run build && npm link # once, from a trusted local checkout
-airgap share
+npx airgap share
 ```
 
 The browser opens automatically. The server binds only to loopback and stops when you click **Done** or after ten minutes of inactivity; airgap itself does not stay resident.
@@ -191,6 +190,19 @@ Read this before you trust a pack with anything sensitive.
 - **A pack is neither encrypted nor authenticated.** Anyone who receives it can read its contents. Manifest hashes detect changes or damage to manifest-declared entries; because the manifest is not signed, they do not prove who created the pack or prevent someone from changing both the contents and their hashes.
 - **`open` independently scans before install.** It does not rely on the manifest's redaction claims and refuses to install declared contents that still match a secret rule unless you pass `--accept-risk`.
 - **Resume compatibility is version-sensitive.** The `~/.claude` install + resume path was verified against **claude 2.1.197/198**. Claude Code's on-disk format can drift; if a future version fails to resume an installed pack, use the fallback `claude --resume <absolute-path> --fork-session` command that `open` prints, and please file an issue.
+
+## Development and contributing
+
+From a trusted checkout:
+
+```sh
+npm ci
+npm run build
+npm run typecheck
+npm test
+```
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for change-specific checks and repository conventions. Report suspected vulnerabilities privately through [SECURITY.md](./SECURITY.md); use [GitHub Issues](https://github.com/kylvia/airgap/issues) for ordinary bugs and feature requests.
 
 ## License
 
