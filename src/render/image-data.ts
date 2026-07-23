@@ -1,21 +1,27 @@
 import type { Turn } from "../types.js";
+import MarkdownIt from "markdown-it";
 
 const INLINE_IMAGE_DATA_SOURCE =
-  String.raw`data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}`;
+  String.raw`data:image\/(?:png|jpeg|webp|gif)(?:;[^,;\s<>"'()]+)*;base64,[A-Za-z0-9+/]+={0,2}`;
 const EXACT_INLINE_IMAGE_DATA = new RegExp(`^${INLINE_IMAGE_DATA_SOURCE}$`, "i");
+const markdown = new MarkdownIt();
 
-function isValidInlineImageData(value: string): boolean {
+export function isSupportedInlineImageData(value: string): boolean {
   if (!EXACT_INLINE_IMAGE_DATA.test(value)) return false;
   const payload = value.slice(value.indexOf(",") + 1);
   return payload.length > 0 && payload.length % 4 === 0;
 }
 
-export function containsInlineImageData(value: string | undefined): boolean {
-  if (!value) return false;
-  for (const match of value.matchAll(new RegExp(INLINE_IMAGE_DATA_SOURCE, "gi"))) {
-    if (match[0] && isValidInlineImageData(match[0])) return true;
+function containsNormalizedInlineImageData(value: string): boolean {
+  const normalized = markdown.utils.unescapeAll(value);
+  for (const match of normalized.matchAll(new RegExp(INLINE_IMAGE_DATA_SOURCE, "gi"))) {
+    if (match[0] && isSupportedInlineImageData(match[0])) return true;
   }
   return false;
+}
+
+export function containsInlineImageData(value: string | undefined): boolean {
+  return value ? containsNormalizedInlineImageData(value) : false;
 }
 
 export function stripInlineImageData(value: string, placeholder = "[图片]"): string {
@@ -24,11 +30,15 @@ export function stripInlineImageData(value: string, placeholder = "[图片]"): s
     "gi",
   );
   const withoutMarkdownImages = value.replace(markdownImage, (match, dataUrl: string) =>
-    isValidInlineImageData(dataUrl) ? placeholder : match);
-  return withoutMarkdownImages.replace(
+    isSupportedInlineImageData(dataUrl) ? placeholder : match);
+  const withoutDirectData = withoutMarkdownImages.replace(
     new RegExp(INLINE_IMAGE_DATA_SOURCE, "gi"),
-    (dataUrl) => isValidInlineImageData(dataUrl) ? placeholder : dataUrl,
+    (dataUrl) => isSupportedInlineImageData(dataUrl) ? placeholder : dataUrl,
   );
+
+  // Entity/backslash-obfuscated forms have no stable raw span; remove only their line.
+  return withoutDirectData.replace(/[^\r\n]+/g, (line) =>
+    containsNormalizedInlineImageData(line) ? placeholder : line);
 }
 
 export function turnsContainImageBytes(turns: Turn[], extraText: readonly string[] = []): boolean {

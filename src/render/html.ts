@@ -4,6 +4,7 @@ import MarkdownIt from "markdown-it";
 import { tasklist } from "@mdit/plugin-tasklist";
 import { THEME_CSS } from "./theme.js";
 import { createI18n, type I18n, type Locale } from "../i18n/index.js";
+import { isSupportedInlineImageData } from "./image-data.js";
 
 export interface RenderOptions {
   /** how tool calls appear; defaults to DEFAULT_TOOL_DISPLAY ("summary") */
@@ -36,12 +37,12 @@ const md = new MarkdownIt({ html: false, linkify: false, breaks: true }).use(tas
   label: false,
 });
 
-// 零外链红线：远程 markdown 图片默认会生成 <img src=远程>，这里只放行 data:image/，其余丢标签留转义后的 alt 文本。
+// 零外链红线：远程 markdown 图片默认会生成 <img src=远程>，这里只放行共享策略认可的 base64 data:image。
 const defaultImageRule = md.renderer.rules.image;
 md.renderer.rules.image = (tokens, idx, options, env, self) => {
   const token = tokens[idx];
   const src = token?.attrGet("src") ?? "";
-  if (!/^data:image\//i.test(src)) return md.utils.escapeHtml(token?.content ?? "");
+  if (!isSupportedInlineImageData(src)) return md.utils.escapeHtml(token?.content ?? "");
   return defaultImageRule
     ? defaultImageRule(tokens, idx, options, env, self)
     : self.renderToken(tokens, idx, options);

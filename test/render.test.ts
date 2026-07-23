@@ -6,6 +6,11 @@ import { renderHtml, markdownToHtml, escapeHtml } from "../src/render/html.js";
 const meta = { title: "demo 会话片段", date: "2026-07-01" };
 const inlinePng =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z7VwAAAAASUVORK5CYII=";
+const inlinePngWithParameter = inlinePng.replace(
+  "data:image/png;",
+  "data:image/png;charset=utf-8;",
+);
+const inlinePngWithEntity = inlinePng.replace("data:", "data&#x3A;");
 
 const turns: Turn[] = [
   {
@@ -102,6 +107,23 @@ describe("renderMarkdown", () => {
     expect(output).not.toContain("data:image/");
     expect(output).not.toContain("iVBORw0KGgo");
     expect(output.match(/\[图片\]/g)).toHaveLength(3);
+  });
+
+  it.each([
+    ["MIME 参数", inlinePngWithParameter],
+    ["HTML 实体", inlinePngWithEntity],
+  ])("剥离 Markdown 规范化后的%s图片字节", (_label, dataUrl) => {
+    const withInlineData: Turn = {
+      index: 1,
+      userText: "hello",
+      assistant: [{ kind: "text", text: `![secret screenshot](${dataUrl})` }],
+      timestamp: null,
+    };
+
+    const output = renderMarkdown([withInlineData], meta);
+
+    expect(output).toContain("[图片]");
+    expect(output).not.toContain("iVBORw0KGgo");
   });
 });
 
@@ -388,13 +410,18 @@ describe("markdown-it 安全与零外链（渲染不可信会话内容）", () =
     expect(markdownToHtml("[c](data:text/html,PHNjcmlwdD4=)")).not.toContain("<a ");
   });
 
-  it("零外链：远程图被丢弃，仅内联 data:image 放行", () => {
+  it("零外链：远程图被丢弃，仅支持的 base64 data:image 放行", () => {
     const remote = markdownToHtml("![x](https://evil.example/x.png)");
     expect(remote).not.toContain("<img");
     expect(remote).not.toContain("evil.example");
     const inline = markdownToHtml("![logo](data:image/png;base64,AAAA)");
     expect(inline).toContain("<img");
     expect(inline).toContain("data:image/png");
+  });
+
+  it("不渲染共享图片策略不认可的非 base64 data:image", () => {
+    const html = markdownToHtml("![x](data:image/png;,%89PNG)");
+    expect(html).not.toContain("<img");
   });
 });
 

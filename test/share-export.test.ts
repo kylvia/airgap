@@ -20,6 +20,11 @@ const cleanTurn: Turn = {
 
 const inlinePng =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z7VwAAAAASUVORK5CYII=";
+const inlinePngWithParameter = inlinePng.replace(
+  "data:image/png;",
+  "data:image/png;charset=utf-8;",
+);
+const inlinePngWithEntity = inlinePng.replace("data:", "data&#x3A;");
 
 const selection: ExportSelection = {
   turns: [cleanTurn],
@@ -239,6 +244,29 @@ describe("Share export coordinator", () => {
       turns: [{
         ...cleanTurn,
         assistant: [{ kind: "text", text: `![secret screenshot](${inlinePng})` }],
+      }],
+    };
+    const { adapter } = fakeAdapter();
+
+    const result = await coordinator(adapter, withMarkdownImage).export(baseRequest);
+
+    expect(result).toMatchObject({
+      outcome: "error",
+      code: "EXPORT_IMAGE_RISK",
+      blocked: true,
+    });
+    expect(adapter.renderPng).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["MIME parameter", inlinePngWithParameter],
+    ["HTML entity", inlinePngWithEntity],
+  ])("blocks Share image export after Markdown normalizes a %s data URI", async (_label, dataUrl) => {
+    const withMarkdownImage: ExportSelection = {
+      ...selection,
+      turns: [{
+        ...cleanTurn,
+        assistant: [{ kind: "text", text: `![secret screenshot](${dataUrl})` }],
       }],
     };
     const { adapter } = fakeAdapter();
